@@ -136,13 +136,26 @@ export function useFitToBox(scene: THREE.Object3D, target: { w: number; h: numbe
   return useMemo(() => {
     const box = new THREE.Box3().setFromObject(scene);
     const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
     box.getSize(size);
+    box.getCenter(center);
     if (size.x === 0 || size.y === 0 || size.z === 0) {
-      return { scale: 1, yOffset: 0 };
+      return {
+        scale: [1, 1, 1] as [number, number, number],
+        offset: [0, 0, 0] as [number, number, number],
+      };
     }
-    const scale = Math.min(target.w / size.x, target.h / size.y, target.d / size.z);
-    const yOffset = -box.min.y * scale;
-    return { scale, yOffset };
+    const scale: [number, number, number] = [
+      target.w / size.x,
+      target.h / size.y,
+      target.d / size.z,
+    ];
+    const offset: [number, number, number] = [
+      -center.x * scale[0],
+      -box.min.y * scale[1],
+      -center.z * scale[2],
+    ];
+    return { scale, offset };
   }, [scene, target.w, target.h, target.d]);
 }
 

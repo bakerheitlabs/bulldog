@@ -5,6 +5,8 @@
 export const BLOCK_SIZE = 50;
 export const ROAD_WIDTH = 8;
 export const SIDEWALK_WIDTH = 3;
+export const BUILDING_FOOTPRINT = BLOCK_SIZE - 2 * SIDEWALK_WIDTH;
+export const SIDEWALK_CENTER_OFFSET = BLOCK_SIZE / 2 - SIDEWALK_WIDTH / 2;
 export const PARKING_LANE_WIDTH = 2.4;
 export const LANE_OFFSET = 2; // right-lane offset from centerline
 
@@ -312,8 +314,7 @@ export function buildRoadWaypoints(): Record<string, Waypoint> {
 // with connections to adjacent rings via the sidewalk corner.
 export function buildPedWaypoints(): Record<string, Waypoint> {
   const map: Record<string, Waypoint> = {};
-  const half = BLOCK_SIZE / 2;
-  const inset = ROAD_WIDTH / 2 + SIDEWALK_WIDTH / 2;
+  const offset = SIDEWALK_CENTER_OFFSET;
 
   for (let row = 0; row < ROWS; row++) {
     for (let col = 0; col < COLS; col++) {
@@ -322,10 +323,10 @@ export function buildPedWaypoints(): Record<string, Waypoint> {
       if (c.kind === 'road') continue;
       const [cx, , cz] = cellCenter(col, row);
       const corners: Array<['nw' | 'ne' | 'sw' | 'se', Vec3]> = [
-        ['nw', [cx - half + inset, 0, cz - half + inset]],
-        ['ne', [cx + half - inset, 0, cz - half + inset]],
-        ['sw', [cx - half + inset, 0, cz + half - inset]],
-        ['se', [cx + half - inset, 0, cz + half - inset]],
+        ['nw', [cx - offset, 0, cz - offset]],
+        ['ne', [cx + offset, 0, cz - offset]],
+        ['sw', [cx - offset, 0, cz + offset]],
+        ['se', [cx + offset, 0, cz + offset]],
       ];
       for (const [side, pos] of corners) {
         const id = makeId('p', col, row, side);

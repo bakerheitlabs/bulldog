@@ -3,6 +3,7 @@ import { starsFromHeat, useGameStore } from '@/state/gameStore';
 import { WEAPONS } from '@/game/weapons/weapons';
 import { getPrompt, subscribePrompt, type InteractionPrompt } from '@/game/interactions/interactionState';
 import { readDrivenCarPos, useVehicleStore } from '@/game/vehicles/vehicleState';
+import CityMap from './CityMap';
 
 export default function HUD() {
   const player = useGameStore((s) => s.player);
@@ -133,6 +134,11 @@ export default function HUD() {
         ))}
       </div>
 
+      {/* top-left: minimap */}
+      <div style={{ position: 'absolute', top: 12, left: 12 }}>
+        <CityMap variant="minimap" />
+      </div>
+
       {/* bottom-right: equipped weapon + ammo, or speedometer while driving */}
       <div
         style={{
@@ -166,8 +172,9 @@ export default function HUD() {
       <div
         style={{
           position: 'absolute',
-          top: 12,
+          top: 174,
           left: 12,
+          maxWidth: 310,
           fontSize: 11,
           opacity: 0.55,
           lineHeight: 1.4,

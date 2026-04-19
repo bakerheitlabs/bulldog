@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSaveStore } from '@/state/saveStore';
+import CityMap from './CityMap';
 
 export default function PauseMenu({ onResume }: { onResume: () => void }) {
   const navigate = useNavigate();
   const save = useSaveStore((s) => s.save);
+  const [screen, setScreen] = useState<'menu' | 'map'>('menu');
 
   return (
     <div
@@ -23,32 +26,77 @@ export default function PauseMenu({ onResume }: { onResume: () => void }) {
           border: '1px solid #333',
           borderRadius: 8,
           padding: 24,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-          minWidth: 280,
+          width: screen === 'map' ? 'min(980px, calc(100vw - 32px))' : 'min(340px, calc(100vw - 32px))',
+          maxHeight: 'calc(100vh - 32px)',
+          overflow: 'auto',
           color: '#eee',
         }}
       >
-        <div style={{ fontSize: 22, fontWeight: 700, textAlign: 'center', marginBottom: 8 }}>Paused</div>
-        <button
-          style={btn}
-          onClick={onResume}
-        >
-          Resume
-        </button>
-        <button
-          style={btn}
-          onClick={() => save('auto', 'Auto Save')}
-        >
-          Save (auto slot)
-        </button>
-        <button
-          style={btn}
-          onClick={() => navigate('/menu')}
-        >
-          Main Menu
-        </button>
+        {screen === 'menu' ? (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+          >
+            <div style={{ fontSize: 22, fontWeight: 700, textAlign: 'center', marginBottom: 8 }}>Paused</div>
+            <button
+              style={btn}
+              onClick={onResume}
+            >
+              Resume
+            </button>
+            <button
+              style={btn}
+              onClick={() => setScreen('map')}
+            >
+              Map
+            </button>
+            <button
+              style={btn}
+              onClick={() => save('auto', 'Auto Save')}
+            >
+              Save (auto slot)
+            </button>
+            <button
+              style={btn}
+              onClick={() => navigate('/menu')}
+            >
+              Main Menu
+            </button>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+              }}
+            >
+              <div style={{ fontSize: 22, fontWeight: 700 }}>City Map</div>
+              <button
+                style={{ ...btn, width: 'auto' }}
+                onClick={() => setScreen('menu')}
+              >
+                Back
+              </button>
+            </div>
+            <CityMap variant="pause" />
+            <div style={{ fontSize: 12, lineHeight: 1.5, color: '#aaa' }}>
+              Drag to pan. Scroll to zoom. Yellow marker is your current position.
+              G marks the gun store, R marks the range, P marks parking lots.
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -62,4 +110,5 @@ const btn: React.CSSProperties = {
   borderRadius: 4,
   cursor: 'pointer',
   fontSize: 14,
+  width: '100%',
 };

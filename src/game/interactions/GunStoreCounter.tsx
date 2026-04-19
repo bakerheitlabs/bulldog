@@ -2,7 +2,7 @@ import { useFrame } from '@react-three/fiber';
 import { useMemo } from 'react';
 import * as THREE from 'three';
 import { useGameStore } from '@/state/gameStore';
-import { findCellByTag, BLOCK_SIZE, SIDEWALK_WIDTH } from '@/game/world/cityLayout';
+import { findCellByTag, BUILDING_FOOTPRINT } from '@/game/world/cityLayout';
 import { clearPrompt, setPrompt } from './interactionState';
 import { useVehicleStore } from '@/game/vehicles/vehicleState';
 
@@ -16,7 +16,7 @@ export default function GunStoreCounter({ onOpen }: { onOpen: () => void }) {
     if (!cell) return new THREE.Vector3();
     const [x, , z] = cell.center;
     // East face of the gunstore building, on the sidewalk facing the road.
-    const faceX = x + (BLOCK_SIZE - 2 * SIDEWALK_WIDTH - 4) / 2 + 1.5;
+    const faceX = x + BUILDING_FOOTPRINT / 2 + 1.5;
     return new THREE.Vector3(faceX, 0, z);
   }, [cell]);
 

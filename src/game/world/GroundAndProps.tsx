@@ -3,6 +3,7 @@ import { BLOCK_SIZE, COLS, ROWS } from './cityLayout';
 import { useVisibleCells } from './Chunks';
 
 const GROUND_SIZE = Math.max(COLS, ROWS) * BLOCK_SIZE * 2;
+const BUILDING_BLOCK_COLOR = '#55585c';
 
 export default function GroundAndProps() {
   const cells = useVisibleCells();
@@ -17,11 +18,18 @@ export default function GroundAndProps() {
         <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
         <meshStandardMaterial color="#3a4a39" />
       </mesh>
-      {/* parks + parking lots get their own surface color */}
+      {/* city blocks, parks, and parking lots get their own surface color */}
       {cells.map(({ col, row, cell, center }) => {
-        if (cell.kind !== 'park' && cell.kind !== 'parkingLot') return null;
+        if (cell.kind !== 'building' && cell.kind !== 'park' && cell.kind !== 'parkingLot') {
+          return null;
+        }
         const [x, , z] = center;
-        const color = cell.kind === 'park' ? '#3e6a3a' : '#46464d';
+        const color =
+          cell.kind === 'building'
+            ? BUILDING_BLOCK_COLOR
+            : cell.kind === 'park'
+              ? '#3e6a3a'
+              : '#46464d';
         return (
           <mesh
             key={`surf_${col}_${row}`}

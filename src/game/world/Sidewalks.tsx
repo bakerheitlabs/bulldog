@@ -1,4 +1,4 @@
-import { BLOCK_SIZE, SIDEWALK_WIDTH } from './cityLayout';
+import { BLOCK_SIZE, SIDEWALK_CENTER_OFFSET, SIDEWALK_WIDTH } from './cityLayout';
 import { useVisibleCells } from './Chunks';
 
 const SIDEWALK_COLOR = '#9a9aa3';
@@ -6,7 +6,7 @@ const SIDEWALK_COLOR = '#9a9aa3';
 export default function Sidewalks() {
   const cells = useVisibleCells();
   const strip = BLOCK_SIZE;
-  const o = BLOCK_SIZE / 2 - SIDEWALK_WIDTH / 2;
+  const o = SIDEWALK_CENTER_OFFSET;
 
   return (
     <group>

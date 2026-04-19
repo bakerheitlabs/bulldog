@@ -1,14 +1,12 @@
 import { Text } from '@react-three/drei';
 import { CuboidCollider, RigidBody } from '@react-three/rapier';
-import { BLOCK_SIZE, SIDEWALK_WIDTH } from './cityLayout';
+import { BUILDING_FOOTPRINT } from './cityLayout';
 import { useCityModel, useFitToBox, type ModelKey } from './cityAssets';
 import GltfBoundary from './GltfBoundary';
 import { useVisibleCells } from './Chunks';
 
-const FOOTPRINT = BLOCK_SIZE - 2 * SIDEWALK_WIDTH - 4;
-
 function GunstoreFront({ x, z, w, h }: { x: number; z: number; w: number; h: number }) {
-  const faceX = x + FOOTPRINT / 2 + 0.01;
+  const faceX = x + w / 2 + 0.01;
   return (
     <group>
       <mesh position={[faceX + 0.5, h * 0.55, z]}>
@@ -89,8 +87,14 @@ function GltfBuilding({
   modelKey: ModelKey;
 }) {
   const scene = useCityModel(modelKey);
-  const { scale, yOffset } = useFitToBox(scene, { w, h, d });
-  return <primitive object={scene} position={[x, yOffset, z]} scale={scale} />;
+  const { scale, offset } = useFitToBox(scene, { w, h, d });
+  return (
+    <primitive
+      object={scene}
+      position={[x + offset[0], offset[1], z + offset[2]]}
+      scale={scale}
+    />
+  );
 }
 
 export default function Buildings() {
@@ -100,8 +104,8 @@ export default function Buildings() {
       {cells.map(({ col, row, cell, center }) => {
         if (cell.kind !== 'building') return null;
         const [x, , z] = center;
-        const w = FOOTPRINT;
-        const d = FOOTPRINT;
+        const w = BUILDING_FOOTPRINT;
+        const d = BUILDING_FOOTPRINT;
         const h = cell.height;
         const isGunstore = cell.tag === 'gunstore';
         const bodyColor = isGunstore ? '#a83a2c' : cell.color;
