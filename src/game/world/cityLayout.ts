@@ -345,6 +345,47 @@ export function getCell(col: number, row: number): Cell | null {
   return G[row][col];
 }
 
+// Coarse line-of-sight check against building footprints. Samples the 2D line
+// and treats any point inside a solid building cell (cell bounds minus
+// sidewalk) as an occluder. Plaza cells are skipped since they hold no
+// buildings.
+export function lineOfSightClear(x1: number, z1: number, x2: number, z2: number): boolean {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const dist = Math.hypot(dx, dz);
+  if (dist < 0.01) return true;
+  const steps = Math.max(2, Math.ceil(dist));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const x = x1 + dx * t;
+    const z = z1 + dz * t;
+    const loc = worldToCell(x, z);
+    if (!loc) continue;
+    const cell = getCell(loc.col, loc.row);
+    if (!cell || cell.kind !== 'building') continue;
+    if (cell.blockType === 'plaza') continue;
+    let bounds: CellBounds;
+    if (cell.mergedInto) {
+      const anchor = getCell(cell.mergedInto.col, cell.mergedInto.row);
+      if (!anchor || anchor.kind !== 'building' || !anchor.mergedBounds) continue;
+      bounds = anchor.mergedBounds;
+    } else if (cell.mergedBounds) {
+      bounds = cell.mergedBounds;
+    } else {
+      bounds = cellBounds(loc.col, loc.row);
+    }
+    if (
+      x >= bounds.minX + SIDEWALK_WIDTH &&
+      x <= bounds.maxX - SIDEWALK_WIDTH &&
+      z >= bounds.minZ + SIDEWALK_WIDTH &&
+      z <= bounds.maxZ - SIDEWALK_WIDTH
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export type CellInfo = {
   col: number;
   row: number;

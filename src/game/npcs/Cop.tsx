@@ -1,7 +1,7 @@
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { PED_WAYPOINTS, type Waypoint } from '@/game/world/cityLayout';
+import { PED_WAYPOINTS, lineOfSightClear, type Waypoint } from '@/game/world/cityLayout';
 import { registerNpc } from './npcRegistry';
 import CharacterModel, { type CharacterAction } from '@/game/characters/CharacterModel';
 import GltfBoundary from '@/game/world/GltfBoundary';
@@ -130,7 +130,8 @@ export default function Cop({
 
     if (hostile) {
       // chase or shoot
-      if (distToPlayer > SHOOT_RANGE) {
+      const canSee = lineOfSightClear(s.pos.x, s.pos.z, target.x, target.z);
+      if (distToPlayer > SHOOT_RANGE || !canSee) {
         const dir = toPlayer.clone().normalize();
         const step = Math.min(CHASE_SPEED * dt, distToPlayer);
         s.pos.addScaledVector(dir, step);
