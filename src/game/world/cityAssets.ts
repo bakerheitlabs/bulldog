@@ -17,6 +17,7 @@ export const MODEL_PATHS = {
   carSuvLuxury: '/models/cars/car_suv_luxury.glb',
   carTaxi: '/models/cars/car_taxi.glb',
   carVan: '/models/cars/car_van.glb',
+  carPolice: '/models/cars/Police Car.glb',
   characterMaleA: '/models/characters/character_male_a.glb',
   characterMaleC: '/models/characters/character_male_c.glb',
   characterMaleD: '/models/characters/character_male_d.glb',

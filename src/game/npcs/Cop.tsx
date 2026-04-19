@@ -39,13 +39,22 @@ function pickNearPlayerWaypointId(): string {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-export default function Cop({ seed, patrol = false }: { seed: number; patrol?: boolean }) {
+export default function Cop({
+  seed,
+  patrol = false,
+  startPos,
+}: {
+  seed: number;
+  patrol?: boolean;
+  startPos?: [number, number, number];
+}) {
   const id = useMemo(() => `cop_${seed}_${Math.random().toString(36).slice(2, 7)}`, [seed]);
   const startId = useMemo(
     () => (patrol ? pickRandomWaypointId() : pickNearPlayerWaypointId()),
     [patrol],
   );
   const start = PED_WAYPOINTS[startId];
+  const initialPos = startPos ?? start.pos;
   const groupRef = useRef<THREE.Group>(null);
   const [hp, setHp] = useState(MAX_HP);
   const [flash, setFlash] = useState(0);
@@ -60,7 +69,7 @@ export default function Cop({ seed, patrol = false }: { seed: number; patrol?: b
     wasMoving: boolean;
     wasShooting: boolean;
   }>({
-    pos: new THREE.Vector3(...start.pos),
+    pos: new THREE.Vector3(...initialPos),
     targetId: startId,
     patrolTarget: new THREE.Vector3(...start.pos),
     shootCd: 0,
