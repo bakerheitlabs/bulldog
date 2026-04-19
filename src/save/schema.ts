@@ -1,8 +1,13 @@
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 export type WeaponId = 'handgun' | 'shotgun';
 
 export type AmmoState = { magazine: number; reserve: number };
+
+export type WantedState = {
+  heat: number;
+  lastCrimeAt: number;
+};
 
 export type GameStoreSnapshot = {
   player: {
@@ -19,6 +24,7 @@ export type GameStoreSnapshot = {
   world: {
     destroyedTargets: string[];
   };
+  wanted: WantedState;
   meta: {
     startedAt: number;
     playtimeMs: number;

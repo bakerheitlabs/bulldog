@@ -82,6 +82,7 @@ export default function Game({
   useInteractionKey(!paused);
 
   const tickPlaytime = useGameStore((s) => s.tickPlaytime);
+  const tickWanted = useGameStore((s) => s.tickWanted);
   const lastTickRef = useRef(performance.now());
   useEffect(() => {
     if (paused) {
@@ -94,11 +95,12 @@ export default function Game({
       const dt = now - lastTickRef.current;
       lastTickRef.current = now;
       tickPlaytime(dt);
+      tickWanted(dt);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [paused, tickPlaytime]);
+  }, [paused, tickPlaytime, tickWanted]);
 
   useEffect(() => {
     if (paused && document.pointerLockElement) {
@@ -143,7 +145,7 @@ export default function Game({
       style={{ position: 'absolute', inset: 0 }}
     >
       <Suspense fallback={null}>
-        <Physics gravity={[0, -9.81, 0]} paused={paused}>
+        <Physics gravity={[0, -9.81, 0]} paused={paused} timeStep="vary">
           <SceneContent paused={paused} onOpenShop={handleOpenShop} />
         </Physics>
       </Suspense>

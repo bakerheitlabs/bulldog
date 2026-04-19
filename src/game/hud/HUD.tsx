@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useGameStore } from '@/state/gameStore';
+import { starsFromHeat, useGameStore } from '@/state/gameStore';
 import { WEAPONS } from '@/game/weapons/weapons';
 import { getPrompt, subscribePrompt, type InteractionPrompt } from '@/game/interactions/interactionState';
 import { readDrivenCarPos, useVehicleStore } from '@/game/vehicles/vehicleState';
@@ -7,6 +7,8 @@ import { readDrivenCarPos, useVehicleStore } from '@/game/vehicles/vehicleState'
 export default function HUD() {
   const player = useGameStore((s) => s.player);
   const inv = useGameStore((s) => s.inventory);
+  const heat = useGameStore((s) => s.wanted.heat);
+  const stars = starsFromHeat(heat);
   const [prompt, setPromptState] = useState<InteractionPrompt | null>(getPrompt());
   const drivenCarId = useVehicleStore((s) => s.drivenCarId);
   const [speedKph, setSpeedKph] = useState(0);
@@ -102,6 +104,33 @@ export default function HUD() {
           </div>
         </div>
         <div style={{ fontSize: 18, fontWeight: 700, color: '#f5cb5c' }}>${player.money.toLocaleString()}</div>
+      </div>
+
+      {/* top-right: wanted stars */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 14,
+          right: 16,
+          display: 'flex',
+          gap: 4,
+          fontFamily: 'monospace',
+          fontSize: 28,
+          lineHeight: 1,
+          letterSpacing: 2,
+        }}
+      >
+        {Array.from({ length: 5 }).map((_, i) => (
+          <span
+            key={i}
+            style={{
+              color: i < stars ? '#f5cb5c' : 'rgba(255,255,255,0.18)',
+              textShadow: i < stars ? '0 0 8px rgba(245,203,92,0.7)' : 'none',
+            }}
+          >
+            ★
+          </span>
+        ))}
       </div>
 
       {/* bottom-right: equipped weapon + ammo, or speedometer while driving */}

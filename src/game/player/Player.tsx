@@ -1,6 +1,6 @@
 import { useFrame } from '@react-three/fiber';
 import { CapsuleCollider, RigidBody, type RapierRigidBody } from '@react-three/rapier';
-import { forwardRef, useCallback, useEffect, useRef } from 'react';
+import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useGameStore } from '@/state/gameStore';
 import { getPlayerSpawn } from '@/game/world/cityLayout';
@@ -12,6 +12,9 @@ import {
 } from '@/game/vehicles/vehicleState';
 import { cameraState } from './cameraState';
 import { useKeyboard } from './useKeyboard';
+import CharacterModel, { type CharacterAction } from '@/game/characters/CharacterModel';
+import GltfBoundary from '@/game/world/GltfBoundary';
+import { PLAYER_VARIANT, WEAPON_MODEL } from '@/game/world/cityAssets';
 
 const SPEED = 5;
 const SPRINT = 9;
@@ -29,6 +32,27 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
   const lastPos = useRef<{ x: number; z: number } | null>(null);
   const drivenCarId = useVehicleStore((s) => s.drivenCarId);
   const wasDriving = useRef(false);
+  const equipped = useGameStore((s) => s.inventory.equipped);
+  const [action, setAction] = useState<CharacterAction>('idle');
+  const actionRef = useRef<CharacterAction>('idle');
+  const mouseDownRef = useRef(false);
+
+  useEffect(() => {
+    if (paused) return;
+    const onDown = (e: MouseEvent) => {
+      if (e.button === 0) mouseDownRef.current = true;
+    };
+    const onUp = (e: MouseEvent) => {
+      if (e.button === 0) mouseDownRef.current = false;
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mouseup', onUp);
+      mouseDownRef.current = false;
+    };
+  }, [paused]);
 
   useEffect(() => {
     const r = rigid.current;
@@ -69,6 +93,10 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
     if (drivenCarId) return; // kinematic while in vehicle
     if (paused) {
       rigid.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      if (actionRef.current !== 'idle') {
+        actionRef.current = 'idle';
+        setAction('idle');
+      }
       return;
     }
 
@@ -90,6 +118,20 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
     const speed = sprint ? SPRINT : SPEED;
     const linvel = rigid.current.linvel();
     rigid.current.setLinvel({ x: dir.x * speed, y: linvel.y, z: dir.z * speed }, true);
+
+    const moving = dir.lengthSq() > 0;
+    const armed = !!equipped;
+    const firing = armed && mouseDownRef.current && document.pointerLockElement != null;
+    let nextAction: CharacterAction;
+    if (firing) nextAction = 'holding-right-shoot';
+    else if (armed && moving) nextAction = sprint ? 'armed-sprint' : 'armed-walk';
+    else if (armed) nextAction = 'holding-right';
+    else if (moving) nextAction = sprint ? 'sprint' : 'walk';
+    else nextAction = 'idle';
+    if (nextAction !== actionRef.current) {
+      actionRef.current = nextAction;
+      setAction(nextAction);
+    }
 
     if (meshRef.current) {
       meshRef.current.rotation.y = yaw + Math.PI;
@@ -133,18 +175,31 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
     >
       <CapsuleCollider args={[0.5, 0.4]} />
       <group ref={meshRef} visible={!drivenCarId}>
-        <mesh position={[0, 0, 0]} castShadow>
-          <capsuleGeometry args={[0.4, 1.0, 4, 8]} />
-          <meshStandardMaterial color="#3a6df0" />
-        </mesh>
-        <mesh position={[0, 0.95, 0]} castShadow>
-          <sphereGeometry args={[0.28, 12, 12]} />
-          <meshStandardMaterial color="#e3b27a" />
-        </mesh>
-        <mesh position={[0, 0.95, -0.27]}>
-          <boxGeometry args={[0.1, 0.1, 0.02]} />
-          <meshStandardMaterial color="#222" />
-        </mesh>
+        <GltfBoundary
+          fallback={
+            <group>
+              <mesh position={[0, 0, 0]} castShadow>
+                <capsuleGeometry args={[0.4, 1.0, 4, 8]} />
+                <meshStandardMaterial color="#3a6df0" />
+              </mesh>
+              <mesh position={[0, 0.95, 0]} castShadow>
+                <sphereGeometry args={[0.28, 12, 12]} />
+                <meshStandardMaterial color="#e3b27a" />
+              </mesh>
+              <mesh position={[0, 0.95, -0.27]}>
+                <boxGeometry args={[0.1, 0.1, 0.02]} />
+                <meshStandardMaterial color="#222" />
+              </mesh>
+            </group>
+          }
+        >
+          <CharacterModel
+            variant={PLAYER_VARIANT}
+            action={action}
+            yBase={-0.9}
+            weaponVariant={equipped ? WEAPON_MODEL[equipped] : null}
+          />
+        </GltfBoundary>
       </group>
     </RigidBody>
   );

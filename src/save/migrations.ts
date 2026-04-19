@@ -3,8 +3,14 @@ import { SAVE_VERSION, type SaveData } from './schema';
 type Migration = (raw: any) => any;
 
 const MIGRATIONS: Record<number, Migration> = {
-  // Example for the future:
-  // 1: (raw) => ({ ...raw, version: 2, game: { ...raw.game, world: { ...raw.game.world, wantedLevel: 0 } } }),
+  1: (raw) => ({
+    ...raw,
+    version: 2,
+    game: {
+      ...raw.game,
+      wanted: { heat: 0, lastCrimeAt: 0 },
+    },
+  }),
 };
 
 export function migrate(raw: any): SaveData {

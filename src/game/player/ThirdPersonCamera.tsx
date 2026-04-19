@@ -27,14 +27,18 @@ export default function ThirdPersonCamera({ target }: { target: CameraTarget }) 
   useFrame((_, dt) => {
     const pos = target.getPosition();
     if (!pos) return;
+    if (!cameraState.orbiting) {
+      const decay = 1 - Math.exp(-dt * 8);
+      cameraState.orbitYaw += (0 - cameraState.orbitYaw) * decay;
+      cameraState.orbitPitch += (0 - cameraState.orbitPitch) * decay;
+    }
     tmpTarget.set(pos.x, pos.y + TARGET_HEIGHT, pos.z);
-    const yaw = cameraState.yaw;
-    const pitch = cameraState.pitch;
+    const yaw = cameraState.yaw + cameraState.orbitYaw;
+    const pitch = cameraState.pitch + cameraState.orbitPitch;
     const offsetX = Math.sin(yaw) * Math.cos(pitch) * CAM_DIST;
     const offsetZ = Math.cos(yaw) * Math.cos(pitch) * CAM_DIST;
     const offsetY = -Math.sin(pitch) * CAM_DIST + CAM_HEIGHT;
     tmpDesired.set(tmpTarget.x + offsetX, tmpTarget.y + offsetY, tmpTarget.z + offsetZ);
-    // smooth follow
     const lerp = 1 - Math.exp(-dt * 12);
     camera.position.lerp(tmpDesired, lerp);
     camera.lookAt(tmpTarget);

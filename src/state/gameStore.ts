@@ -19,7 +19,20 @@ type GameState = GameStoreSnapshot & {
   reloadWeapon: (id: WeaponId) => void;
   recordTargetHit: (targetId: string) => void;
   tickPlaytime: (deltaMs: number) => void;
+  bumpHeat: (amount: number) => void;
+  clearWanted: () => void;
+  tickWanted: (deltaMs: number) => void;
 };
+
+export const HEAT_MAX = 100;
+export const HEAT_PER_STAR = HEAT_MAX / 5;
+const HEAT_DECAY_PER_SEC = 3;
+const HEAT_COOLDOWN_MS = 4000;
+
+export function starsFromHeat(heat: number): number {
+  if (heat <= 0) return 0;
+  return Math.min(5, Math.ceil(heat / HEAT_PER_STAR));
+}
 
 function initialSnapshot(): GameStoreSnapshot {
   return {
@@ -35,6 +48,7 @@ function initialSnapshot(): GameStoreSnapshot {
       ammo: {},
     },
     world: { destroyedTargets: [] },
+    wanted: { heat: 0, lastCrimeAt: 0 },
     meta: { startedAt: Date.now(), playtimeMs: 0 },
   };
 }
@@ -54,6 +68,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         ) as GameStoreSnapshot['inventory']['ammo'],
       },
       world: { destroyedTargets: [...s.world.destroyedTargets] },
+      wanted: { ...s.wanted },
       meta: { ...s.meta },
     };
   },
@@ -116,4 +131,21 @@ export const useGameStore = create<GameState>((set, get) => ({
         : { world: { ...s.world, destroyedTargets: [...s.world.destroyedTargets, targetId] } },
     ),
   tickPlaytime: (deltaMs) => set((s) => ({ meta: { ...s.meta, playtimeMs: s.meta.playtimeMs + deltaMs } })),
+  bumpHeat: (amount) =>
+    set((s) => ({
+      wanted: {
+        heat: Math.min(HEAT_MAX, s.wanted.heat + amount),
+        lastCrimeAt: Date.now(),
+      },
+    })),
+  clearWanted: () => set({ wanted: { heat: 0, lastCrimeAt: 0 } }),
+  tickWanted: (deltaMs) =>
+    set((s) => {
+      if (s.wanted.heat <= 0) return {};
+      const sinceCrime = Date.now() - s.wanted.lastCrimeAt;
+      if (sinceCrime < HEAT_COOLDOWN_MS) return {};
+      const next = Math.max(0, s.wanted.heat - (HEAT_DECAY_PER_SEC * deltaMs) / 1000);
+      if (next === s.wanted.heat) return {};
+      return { wanted: { ...s.wanted, heat: next } };
+    }),
 }));

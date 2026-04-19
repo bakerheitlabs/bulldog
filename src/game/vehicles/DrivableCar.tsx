@@ -6,6 +6,9 @@ import { useVehicleStore, writeDrivenCarPose } from './vehicleState';
 import { registerVehicle } from './vehicleRegistry';
 import { useKeyboard } from '@/game/player/useKeyboard';
 import { startEngine, type EngineHandle } from '@/game/audio/synth';
+import CarModel from './CarModel';
+import GltfBoundary from '@/game/world/GltfBoundary';
+import type { CarVariant } from '@/game/world/cityAssets';
 
 const MAX_SPEED = 16;
 const REVERSE_SPEED = 6;
@@ -19,10 +22,53 @@ type Props = {
   initialPos: [number, number, number];
   initialRotY: number;
   color: string;
+  variant: CarVariant;
   paused: boolean;
 };
 
-export default function DrivableCar({ id, initialPos, initialRotY, color, paused }: Props) {
+function PrimitiveCar({ color, isDriven }: { color: string; isDriven: boolean }) {
+  return (
+    <group>
+      <mesh castShadow>
+        <boxGeometry args={[1.8, 0.9, 4]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+      <mesh position={[0, 0.55, -0.2]} castShadow>
+        <boxGeometry args={[1.6, 0.5, 2.2]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+      <mesh position={[0, 0.55, -0.2]}>
+        <boxGeometry args={[1.61, 0.4, 2.21]} />
+        <meshStandardMaterial color="#1a1a22" transparent opacity={0.85} />
+      </mesh>
+      <mesh position={[0.5, 0.2, 2.0]}>
+        <sphereGeometry args={[0.12, 8, 8]} />
+        <meshStandardMaterial
+          color="#fff7c2"
+          emissive="#fff7c2"
+          emissiveIntensity={isDriven ? 0.9 : 0.2}
+        />
+      </mesh>
+      <mesh position={[-0.5, 0.2, 2.0]}>
+        <sphereGeometry args={[0.12, 8, 8]} />
+        <meshStandardMaterial
+          color="#fff7c2"
+          emissive="#fff7c2"
+          emissiveIntensity={isDriven ? 0.9 : 0.2}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+export default function DrivableCar({
+  id,
+  initialPos,
+  initialRotY,
+  color,
+  variant,
+  paused,
+}: Props) {
   const rigid = useRef<RapierRigidBody | null>(null);
   const meshGroup = useRef<THREE.Group>(null);
   const keys = useKeyboard();
@@ -131,34 +177,9 @@ export default function DrivableCar({ id, initialPos, initialRotY, color, paused
     >
       <CuboidCollider args={[0.9, 0.45, 2]} />
       <group ref={meshGroup}>
-        <mesh castShadow>
-          <boxGeometry args={[1.8, 0.9, 4]} />
-          <meshStandardMaterial color={color} />
-        </mesh>
-        <mesh position={[0, 0.55, -0.2]} castShadow>
-          <boxGeometry args={[1.6, 0.5, 2.2]} />
-          <meshStandardMaterial color={color} />
-        </mesh>
-        <mesh position={[0, 0.55, -0.2]}>
-          <boxGeometry args={[1.61, 0.4, 2.21]} />
-          <meshStandardMaterial color="#1a1a22" transparent opacity={0.85} />
-        </mesh>
-        <mesh position={[0.5, 0.2, 2.0]}>
-          <sphereGeometry args={[0.12, 8, 8]} />
-          <meshStandardMaterial
-            color="#fff7c2"
-            emissive="#fff7c2"
-            emissiveIntensity={isDriven ? 0.9 : 0.2}
-          />
-        </mesh>
-        <mesh position={[-0.5, 0.2, 2.0]}>
-          <sphereGeometry args={[0.12, 8, 8]} />
-          <meshStandardMaterial
-            color="#fff7c2"
-            emissive="#fff7c2"
-            emissiveIntensity={isDriven ? 0.9 : 0.2}
-          />
-        </mesh>
+        <GltfBoundary fallback={<PrimitiveCar color={color} isDriven={isDriven} />}>
+          <CarModel variant={variant} />
+        </GltfBoundary>
       </group>
     </RigidBody>
   );

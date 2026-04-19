@@ -2,7 +2,11 @@ import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { PED_WAYPOINTS, type Waypoint } from '@/game/world/cityLayout';
+import { pickPedestrianVariantBySeed } from '@/game/world/cityAssets';
 import { registerNpc } from './npcRegistry';
+import CharacterModel from '@/game/characters/CharacterModel';
+import GltfBoundary from '@/game/world/GltfBoundary';
+import { useGameStore } from '@/state/gameStore';
 
 const SPEED = 1.3;
 const MAX_HP = 60;
@@ -49,7 +53,11 @@ export default function Pedestrian({ seed }: { seed: number }) {
       height: 1.8,
       alive: !dead,
       takeHit: (damage: number) => {
-        setHp((h) => Math.max(0, h - damage));
+        setHp((h) => {
+          const next = Math.max(0, h - damage);
+          if (h > 0 && next === 0) useGameStore.getState().bumpHeat(22);
+          return next;
+        });
         setFlash(1);
       },
     });
@@ -82,27 +90,13 @@ export default function Pedestrian({ seed }: { seed: number }) {
     }
   });
 
+  const variant = useMemo(() => pickPedestrianVariantBySeed(seed), [seed]);
   const bodyColor = flash ? '#ff4444' : stateRef.current.color;
   const headColor = flash ? '#ff4444' : '#e3b27a';
+  const action = dead ? 'die' : 'walk';
 
-  if (dead) {
-    // ragdoll-lite: lay on the ground
-    return (
-      <group position={[stateRef.current.pos.x, 0, stateRef.current.pos.z]} rotation={[0, 0, Math.PI / 2]}>
-        <mesh position={[0, 0.4, 0]}>
-          <capsuleGeometry args={[0.28, 0.8, 4, 8]} />
-          <meshStandardMaterial color="#7a3a3a" />
-        </mesh>
-        <mesh position={[0.7, 0.4, 0]}>
-          <sphereGeometry args={[0.22, 10, 10]} />
-          <meshStandardMaterial color="#a6855a" />
-        </mesh>
-      </group>
-    );
-  }
-
-  return (
-    <group ref={groupRef}>
+  const primitiveFallback = (
+    <group>
       <mesh position={[0, 0.8, 0]} castShadow>
         <capsuleGeometry args={[0.28, 0.8, 4, 8]} />
         <meshStandardMaterial color={bodyColor} />
@@ -111,7 +105,15 @@ export default function Pedestrian({ seed }: { seed: number }) {
         <sphereGeometry args={[0.22, 10, 10]} />
         <meshStandardMaterial color={headColor} />
       </mesh>
-      {hp < MAX_HP && (
+    </group>
+  );
+
+  return (
+    <group ref={groupRef}>
+      <GltfBoundary fallback={primitiveFallback}>
+        <CharacterModel variant={variant} action={action} />
+      </GltfBoundary>
+      {!dead && hp < MAX_HP && (
         <group position={[0, 2.0, 0]}>
           <mesh>
             <planeGeometry args={[0.8, 0.08]} />

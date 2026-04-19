@@ -81,6 +81,7 @@ export function useWeaponController({ paused }: { paused: boolean }) {
     // fire
     cooldownRef.current = 1 / def.fireRate;
     useGameStore.getState().consumeAmmo(equipped, 1);
+    useGameStore.getState().bumpHeat(1.5);
     playGunshot(equipped);
 
     const origin = new THREE.Vector3();

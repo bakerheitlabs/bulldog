@@ -2,6 +2,9 @@ import { useFrame } from '@react-three/fiber';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { ROAD_WAYPOINTS, type Waypoint } from '@/game/world/cityLayout';
+import { pickCarVariantBySeed } from '@/game/world/cityAssets';
+import CarModel from '@/game/vehicles/CarModel';
+import GltfBoundary from '@/game/world/GltfBoundary';
 
 const SPEED = 7;
 
@@ -52,21 +55,23 @@ export default function DrivenCar({ seed }: { seed: number }) {
     }
   });
 
-  return (
-    <group ref={groupRef}>
+  const variant = useMemo(() => pickCarVariantBySeed(seed), [seed]);
+  const color = stateRef.current.color;
+
+  const primitiveFallback = (
+    <group>
       <mesh castShadow>
         <boxGeometry args={[1.8, 0.9, 4]} />
-        <meshStandardMaterial color={stateRef.current.color} />
+        <meshStandardMaterial color={color} />
       </mesh>
       <mesh position={[0, 0.55, -0.2]} castShadow>
         <boxGeometry args={[1.6, 0.5, 2.2]} />
-        <meshStandardMaterial color={stateRef.current.color} />
+        <meshStandardMaterial color={color} />
       </mesh>
       <mesh position={[0, 0.55, -0.2]}>
         <boxGeometry args={[1.61, 0.4, 2.21]} />
         <meshStandardMaterial color="#1a1a22" transparent opacity={0.85} />
       </mesh>
-      {/* headlights */}
       <mesh position={[0.5, 0.2, 2.0]}>
         <sphereGeometry args={[0.12, 8, 8]} />
         <meshStandardMaterial color="#fff7c2" emissive="#fff7c2" emissiveIntensity={0.6} />
@@ -75,6 +80,14 @@ export default function DrivenCar({ seed }: { seed: number }) {
         <sphereGeometry args={[0.12, 8, 8]} />
         <meshStandardMaterial color="#fff7c2" emissive="#fff7c2" emissiveIntensity={0.6} />
       </mesh>
+    </group>
+  );
+
+  return (
+    <group ref={groupRef}>
+      <GltfBoundary fallback={primitiveFallback}>
+        <CarModel variant={variant} />
+      </GltfBoundary>
     </group>
   );
 }
