@@ -61,6 +61,9 @@ Kenney releases his asset kits under [CC0 1.0](https://creativecommons.org/publi
 - **Pistol** by **Zsky** — [`public/models/weapons/Pistol.glb`](public/models/weapons/Pistol.glb)
   — [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/)
   — via Poly Pizza: <https://poly.pizza/m/3To2e7sKmO>
+- **Traffic Light** by **Quaternius** — [`public/models/city/Traffic Light.glb`](public/models/city/Traffic%20Light.glb)
+  — [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/)
+  — via Poly Pizza: <https://poly.pizza/m/lg9AKWejnF>
 
 ## Project code
 

@@ -1,10 +1,11 @@
 import { CuboidCollider, RigidBody } from '@react-three/rapier';
-import { allCells, BLOCK_SIZE, COLS, ROWS } from './cityLayout';
+import { BLOCK_SIZE, COLS, ROWS } from './cityLayout';
+import { useVisibleCells } from './Chunks';
 
 const GROUND_SIZE = Math.max(COLS, ROWS) * BLOCK_SIZE * 2;
 
 export default function GroundAndProps() {
-  const cells = allCells();
+  const cells = useVisibleCells();
   return (
     <group>
       {/* infinite-ish ground plane (collider only — visual is per-cell) */}

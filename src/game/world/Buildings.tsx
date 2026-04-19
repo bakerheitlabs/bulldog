@@ -1,8 +1,9 @@
 import { Text } from '@react-three/drei';
 import { CuboidCollider, RigidBody } from '@react-three/rapier';
-import { allCells, BLOCK_SIZE, SIDEWALK_WIDTH } from './cityLayout';
+import { BLOCK_SIZE, SIDEWALK_WIDTH } from './cityLayout';
 import { useCityModel, useFitToBox, type ModelKey } from './cityAssets';
 import GltfBoundary from './GltfBoundary';
+import { useVisibleCells } from './Chunks';
 
 const FOOTPRINT = BLOCK_SIZE - 2 * SIDEWALK_WIDTH - 4;
 
@@ -93,7 +94,7 @@ function GltfBuilding({
 }
 
 export default function Buildings() {
-  const cells = allCells();
+  const cells = useVisibleCells();
   return (
     <group>
       {cells.map(({ col, row, cell, center }) => {

@@ -1,7 +1,13 @@
 import { useFrame } from '@react-three/fiber';
 import { useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { ROAD_WAYPOINTS, type Waypoint } from '@/game/world/cityLayout';
+import {
+  BLOCK_SIZE,
+  LANE_WAYPOINTS,
+  getIntersection,
+  type LaneWaypoint,
+} from '@/game/world/cityLayout';
+import { mustStopAtLight } from '@/game/world/trafficLightState';
 import CarModel from '@/game/vehicles/CarModel';
 import GltfBoundary from '@/game/world/GltfBoundary';
 import Cop from './Cop';
@@ -10,6 +16,7 @@ import { useVehicleStore } from '@/game/vehicles/vehicleState';
 
 const PATROL_SPEED = 7;
 const PURSUIT_SPEED = 11;
+const STOP_BACKOFF = BLOCK_SIZE / 2 + 1;
 const DEPLOY_RANGE = 10;
 const PURSUIT_SPAWN_MIN_DIST = 60;
 const DEPLOY_ROLL_INTERVAL_S = 2;
@@ -20,26 +27,27 @@ const DEPLOY_OFFSETS: ReadonlyArray<[number, number]> = [
   [-2.2, 0.5],
 ];
 
-function pickRandomRoadWp(): Waypoint {
-  const ids = Object.keys(ROAD_WAYPOINTS);
-  return ROAD_WAYPOINTS[ids[Math.floor(Math.random() * ids.length)]];
+function pickRandomLaneWp(): LaneWaypoint {
+  const ids = Object.keys(LANE_WAYPOINTS);
+  return LANE_WAYPOINTS[ids[Math.floor(Math.random() * ids.length)]];
 }
 
-function pickFarRoadWp(playerX: number, playerZ: number): Waypoint {
-  const ids = Object.keys(ROAD_WAYPOINTS);
+function pickFarLaneWp(playerX: number, playerZ: number): LaneWaypoint {
+  const ids = Object.keys(LANE_WAYPOINTS);
   const far = ids.filter((id) => {
-    const [x, , z] = ROAD_WAYPOINTS[id].pos;
+    const [x, , z] = LANE_WAYPOINTS[id].pos;
     return Math.hypot(x - playerX, z - playerZ) >= PURSUIT_SPAWN_MIN_DIST;
   });
   const pool = far.length ? far : ids;
-  return ROAD_WAYPOINTS[pool[Math.floor(Math.random() * pool.length)]];
+  return LANE_WAYPOINTS[pool[Math.floor(Math.random() * pool.length)]];
 }
 
-function pickRandomNeighbor(currentId: string, prevId: string | null): Waypoint {
-  const cur = ROAD_WAYPOINTS[currentId];
+function pickRandomNeighbor(currentId: string, prevId: string | null): LaneWaypoint {
+  const cur = LANE_WAYPOINTS[currentId];
   const choices = cur.neighbors.filter((n) => n !== prevId);
   const list = choices.length ? choices : cur.neighbors;
-  return ROAD_WAYPOINTS[list[Math.floor(Math.random() * list.length)]];
+  if (list.length === 0) return cur;
+  return LANE_WAYPOINTS[list[Math.floor(Math.random() * list.length)]];
 }
 
 function pickNeighborTowardPlayer(
@@ -47,21 +55,36 @@ function pickNeighborTowardPlayer(
   prevId: string | null,
   playerX: number,
   playerZ: number,
-): Waypoint {
-  const cur = ROAD_WAYPOINTS[currentId];
+): LaneWaypoint {
+  const cur = LANE_WAYPOINTS[currentId];
   const choices = cur.neighbors.filter((n) => n !== prevId);
   const list = choices.length ? choices : cur.neighbors;
+  if (list.length === 0) return cur;
   let best = list[0];
   let bestDist = Infinity;
   for (const n of list) {
-    const [nx, , nz] = ROAD_WAYPOINTS[n].pos;
+    const [nx, , nz] = LANE_WAYPOINTS[n].pos;
     const d = Math.hypot(nx - playerX, nz - playerZ);
     if (d < bestDist) {
       bestDist = d;
       best = n;
     }
   }
-  return ROAD_WAYPOINTS[best];
+  return LANE_WAYPOINTS[best];
+}
+
+function stopLineFor(target: LaneWaypoint): [number, number, number] {
+  const [tx, , tz] = target.pos;
+  switch (target.dir) {
+    case 'N':
+      return [tx, 0, tz + STOP_BACKOFF];
+    case 'S':
+      return [tx, 0, tz - STOP_BACKOFF];
+    case 'E':
+      return [tx - STOP_BACKOFF, 0, tz];
+    case 'W':
+      return [tx + STOP_BACKOFF, 0, tz];
+  }
 }
 
 export default function PoliceCruiser({
@@ -74,9 +97,9 @@ export default function PoliceCruiser({
   const start = useMemo(() => {
     if (mode === 'response') {
       const [px, , pz] = useGameStore.getState().player.position;
-      return pickFarRoadWp(px, pz);
+      return pickFarLaneWp(px, pz);
     }
-    return pickRandomRoadWp();
+    return pickRandomLaneWp();
   }, [mode]);
   const groupRef = useRef<THREE.Group>(null);
   const [deployed, setDeployed] = useState(false);
@@ -124,16 +147,35 @@ export default function PoliceCruiser({
       }
     }
 
+    const targetWp = LANE_WAYPOINTS[s.targetId];
+    if (!targetWp) return;
+
+    // Aim at stop line if a light is red — unless in hostile pursuit.
+    let aim: [number, number, number] = [targetWp.pos[0], 0.6, targetWp.pos[2]];
+    let holding = false;
+    if (!hostile && targetWp.isIntersection) {
+      const it = getIntersection(targetWp.col, targetWp.row);
+      if (it && mustStopAtLight(targetWp.dir, it.phaseOffset)) {
+        const sl = stopLineFor(targetWp);
+        aim = [sl[0], 0.6, sl[2]];
+        holding = true;
+      }
+    }
+    s.target.set(...aim);
+
     const dir = s.target.clone().sub(s.pos);
     dir.y = 0;
     const dist = dir.length();
     if (dist < 0.6) {
+      if (holding) {
+        if (groupRef.current) groupRef.current.position.copy(s.pos);
+        return;
+      }
       const next = hostile
         ? pickNeighborTowardPlayer(s.targetId, s.prevId, px, pz)
         : pickRandomNeighbor(s.targetId, s.prevId);
       s.prevId = s.targetId;
       s.targetId = next.id;
-      s.target.set(next.pos[0], 0.6, next.pos[2]);
       return;
     }
     dir.normalize();
