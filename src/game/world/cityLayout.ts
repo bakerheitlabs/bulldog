@@ -1,14 +1,17 @@
 // Hand-authored city layout. Pure data — no Three.js imports.
 // Coordinates are in meters. The grid origin is at the world origin.
-// Each "cell" is BLOCK_SIZE x BLOCK_SIZE meters.
+//
+// The grid is non-uniform: each column has an independent width and each row
+// an independent depth, stored in COL_WIDTHS / ROW_DEPTHS and accumulated into
+// edge arrays. World positions come from those edges via cellCenter/cellBounds.
 
-export const BLOCK_SIZE = 50;
 export const ROAD_WIDTH = 8;
 export const SIDEWALK_WIDTH = 3;
-export const BUILDING_FOOTPRINT = BLOCK_SIZE - 2 * SIDEWALK_WIDTH;
-export const SIDEWALK_CENTER_OFFSET = BLOCK_SIZE / 2 - SIDEWALK_WIDTH / 2;
 export const PARKING_LANE_WIDTH = 2.4;
 export const LANE_OFFSET = 2; // right-lane offset from centerline
+// Narrow road corridors: 8m drivable road + 3m shoulder on each side. Shoulders
+// double as buffer between road and adjacent block sidewalks.
+export const ROAD_STRIP_WIDTH = ROAD_WIDTH + SIDEWALK_WIDTH * 2;
 
 // 15x15 with a road on every odd col/row — 7×7 arterial intersections.
 export const COLS = 15;
@@ -32,6 +35,8 @@ const PARKING_LOTS: ReadonlyArray<[number, number]> = [
 ];
 
 export type Vec3 = [number, number, number];
+export type CellBounds = { minX: number; maxX: number; minZ: number; maxZ: number };
+export type CellRef = { col: number; row: number };
 
 export type RoadCell = {
   kind: 'road';
@@ -39,13 +44,24 @@ export type RoadCell = {
   carriesNS: boolean; // vertical lanes available
   carriesEW: boolean; // horizontal lanes available
   isIntersection: boolean;
+  // Set when this road cell is swallowed by a neighboring super-block.
+  mergedInto?: CellRef;
 };
+
+export type BlockType = 'standard' | 'subdivided' | 'mixed' | 'plaza';
 
 export type BuildingCell = {
   kind: 'building';
   height: number;
   color: string;
   tag?: 'gunstore' | 'range';
+  blockType: BlockType;
+  // Super-block anchor: lists absorbed (road + sibling-block) cells and the
+  // merged footprint spanning all three.
+  absorbs?: ReadonlyArray<CellRef>;
+  mergedBounds?: CellBounds;
+  // Absorbed sibling: points at its anchor; should not render on its own.
+  mergedInto?: CellRef;
 };
 
 export type ParkingLotCell = {
@@ -85,6 +101,51 @@ function isRoadIndex(i: number) {
   return i % 2 === 1;
 }
 
+// --- Non-uniform grid axes ---
+
+export type AxisKind = 'road' | 'block';
+
+function buildAxisKinds(count: number): AxisKind[] {
+  const out: AxisKind[] = [];
+  for (let i = 0; i < count; i++) out.push(isRoadIndex(i) ? 'road' : 'block');
+  return out;
+}
+
+// Block widths jitter in [BLOCK_MIN, BLOCK_MAX]; road strips stay uniform.
+const BLOCK_MIN = 32;
+const BLOCK_MAX = 60;
+
+// Per-axis width table. Road axes are narrow and uniform; block axes pick a
+// width from the seeded RNG so rows/cols have varying extents.
+function buildAxisSizes(kinds: AxisKind[], seed: number): number[] {
+  const rand = mulberry32(seed);
+  return kinds.map((k) =>
+    k === 'road' ? ROAD_STRIP_WIDTH : BLOCK_MIN + Math.floor(rand() * (BLOCK_MAX - BLOCK_MIN + 1)),
+  );
+}
+
+// Accumulated edge positions, centered on the world origin.
+// edges[i] is the minimum world coord of cell i; edges[count] is the max of the last cell.
+function buildAxisEdges(sizes: number[]): number[] {
+  const total = sizes.reduce((a, b) => a + b, 0);
+  const edges: number[] = [-total / 2];
+  for (const s of sizes) edges.push(edges[edges.length - 1] + s);
+  return edges;
+}
+
+const COL_KINDS = buildAxisKinds(COLS);
+const ROW_KINDS = buildAxisKinds(ROWS);
+// Distinct seeds so column widths and row depths don't mirror each other.
+const COL_WIDTHS = buildAxisSizes(COL_KINDS, CITY_SEED ^ 0xa1b2c3d4);
+const ROW_DEPTHS = buildAxisSizes(ROW_KINDS, CITY_SEED ^ 0x5e6f7a8b);
+const COL_EDGES = buildAxisEdges(COL_WIDTHS);
+const ROW_EDGES = buildAxisEdges(ROW_DEPTHS);
+
+export const CITY_WIDTH = COL_EDGES[COLS] - COL_EDGES[0];
+export const CITY_DEPTH = ROW_EDGES[ROWS] - ROW_EDGES[0];
+export const CITY_MIN_X = COL_EDGES[0];
+export const CITY_MIN_Z = ROW_EDGES[0];
+
 function buildGrid(): Cell[][] {
   const rand = mulberry32(CITY_SEED);
   const grid: Cell[][] = [];
@@ -121,9 +182,21 @@ function buildGrid(): Cell[][] {
       }
       const key = `${col},${row}`;
       if (col === GUNSTORE[0] && row === GUNSTORE[1]) {
-        line.push({ kind: 'building', height: 14, color: '#8b6f47', tag: 'gunstore' });
+        line.push({
+          kind: 'building',
+          height: 14,
+          color: '#8b6f47',
+          tag: 'gunstore',
+          blockType: 'standard',
+        });
       } else if (col === RANGE[0] && row === RANGE[1]) {
-        line.push({ kind: 'building', height: 12, color: '#7c5b3b', tag: 'range' });
+        line.push({
+          kind: 'building',
+          height: 12,
+          color: '#7c5b3b',
+          tag: 'range',
+          blockType: 'standard',
+        });
       } else if (parks.has(key)) {
         line.push({ kind: 'park' });
       } else if (lots.has(key)) {
@@ -131,7 +204,7 @@ function buildGrid(): Cell[][] {
       } else {
         const height = 10 + Math.floor(rand() * 19); // 10–28m
         const color = BUILDING_COLORS[Math.floor(rand() * BUILDING_COLORS.length)];
-        line.push({ kind: 'building', height, color });
+        line.push({ kind: 'building', height, color, blockType: 'standard' });
       }
     }
     grid.push(line);
@@ -139,12 +212,132 @@ function buildGrid(): Cell[][] {
   return grid;
 }
 
+// Super-blocks: occasionally promote a non-intersection road cell (and its two
+// flanking plain-building cells) into a single merged block. Anchor is always
+// the left/top block; it owns `absorbs` + `mergedBounds`. The road cell and
+// the opposite block get `mergedInto` pointing back at the anchor.
+function applySuperBlocks(grid: Cell[][]) {
+  const rand = mulberry32(CITY_SEED ^ 0xdeadbeef);
+  const PROB = 0.12;
+  const taken = new Set<string>();
+  const isPlainBuilding = (c: Cell): c is BuildingCell =>
+    c.kind === 'building' && c.tag == null;
+
+  for (let row = 0; row < ROWS; row++) {
+    for (let col = 1; col < COLS - 1; col++) {
+      const key = `${col},${row}`;
+      if (taken.has(key)) continue;
+      const c = grid[row][col];
+      if (c.kind !== 'road' || c.isIntersection) continue;
+      if (!c.carriesNS) continue;
+      const leftKey = `${col - 1},${row}`;
+      const rightKey = `${col + 1},${row}`;
+      if (taken.has(leftKey) || taken.has(rightKey)) continue;
+      const left = grid[row][col - 1];
+      const right = grid[row][col + 1];
+      if (!isPlainBuilding(left) || !isPlainBuilding(right)) continue;
+      if (rand() >= PROB) continue;
+      const anchor: CellRef = { col: col - 1, row };
+      left.absorbs = [{ col, row }, { col: col + 1, row }];
+      const lb = cellBounds(col - 1, row);
+      const rb = cellBounds(col + 1, row);
+      left.mergedBounds = { minX: lb.minX, maxX: rb.maxX, minZ: lb.minZ, maxZ: lb.maxZ };
+      right.mergedInto = anchor;
+      c.mergedInto = anchor;
+      taken.add(leftKey);
+      taken.add(key);
+      taken.add(rightKey);
+    }
+  }
+
+  for (let col = 0; col < COLS; col++) {
+    for (let row = 1; row < ROWS - 1; row++) {
+      const key = `${col},${row}`;
+      if (taken.has(key)) continue;
+      const c = grid[row][col];
+      if (c.kind !== 'road' || c.isIntersection) continue;
+      if (!c.carriesEW) continue;
+      const topKey = `${col},${row - 1}`;
+      const botKey = `${col},${row + 1}`;
+      if (taken.has(topKey) || taken.has(botKey)) continue;
+      const top = grid[row - 1][col];
+      const bot = grid[row + 1][col];
+      if (!isPlainBuilding(top) || !isPlainBuilding(bot)) continue;
+      if (rand() >= PROB) continue;
+      const anchor: CellRef = { col, row: row - 1 };
+      top.absorbs = [{ col, row }, { col, row: row + 1 }];
+      const tb = cellBounds(col, row - 1);
+      const bb = cellBounds(col, row + 1);
+      top.mergedBounds = { minX: tb.minX, maxX: tb.maxX, minZ: tb.minZ, maxZ: bb.maxZ };
+      bot.mergedInto = anchor;
+      c.mergedInto = anchor;
+      taken.add(topKey);
+      taken.add(key);
+      taken.add(botKey);
+    }
+  }
+}
+
+// Per-block variety: after merges, roll a block type for each plain building
+// cell. Anchors and tagged cells stay `standard` to keep landmarks predictable
+// and merge rendering simple.
+function assignBlockTypes(grid: Cell[][]) {
+  const rand = mulberry32(CITY_SEED ^ 0xc0ffee42);
+  for (let row = 0; row < ROWS; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const c = grid[row][col];
+      if (c.kind !== 'building') continue;
+      if (c.tag || c.absorbs || c.mergedInto) continue;
+      const r = rand();
+      if (r < 0.55) c.blockType = 'standard';
+      else if (r < 0.75) c.blockType = 'subdivided';
+      else if (r < 0.87) c.blockType = 'mixed';
+      else c.blockType = 'plaza';
+    }
+  }
+}
+
 const G: Cell[][] = buildGrid();
+applySuperBlocks(G);
+assignBlockTypes(G);
 
 export function cellCenter(col: number, row: number): Vec3 {
-  const x = (col - (COLS - 1) / 2) * BLOCK_SIZE;
-  const z = (row - (ROWS - 1) / 2) * BLOCK_SIZE;
+  const x = (COL_EDGES[col] + COL_EDGES[col + 1]) / 2;
+  const z = (ROW_EDGES[row] + ROW_EDGES[row + 1]) / 2;
   return [x, 0, z];
+}
+
+export function cellSize(col: number, row: number): { width: number; depth: number } {
+  return { width: COL_WIDTHS[col], depth: ROW_DEPTHS[row] };
+}
+
+export function cellBounds(col: number, row: number): CellBounds {
+  return {
+    minX: COL_EDGES[col],
+    maxX: COL_EDGES[col + 1],
+    minZ: ROW_EDGES[row],
+    maxZ: ROW_EDGES[row + 1],
+  };
+}
+
+// Binary search for the cell index containing world coord `v` along an edges axis.
+function findEdgeIndex(edges: number[], v: number): number {
+  if (v < edges[0] || v >= edges[edges.length - 1]) return -1;
+  let lo = 0;
+  let hi = edges.length - 1;
+  while (lo + 1 < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (edges[mid] <= v) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+export function worldToCell(x: number, z: number): { col: number; row: number } | null {
+  const col = findEdgeIndex(COL_EDGES, x);
+  const row = findEdgeIndex(ROW_EDGES, z);
+  if (col < 0 || row < 0) return null;
+  return { col, row };
 }
 
 export function getCell(col: number, row: number): Cell | null {
@@ -152,13 +345,25 @@ export function getCell(col: number, row: number): Cell | null {
   return G[row][col];
 }
 
-export type CellInfo = { col: number; row: number; cell: Cell; center: Vec3 };
+export type CellInfo = {
+  col: number;
+  row: number;
+  cell: Cell;
+  center: Vec3;
+  size: { width: number; depth: number };
+};
 
 export function allCells(): CellInfo[] {
   const out: CellInfo[] = [];
   for (let row = 0; row < ROWS; row++) {
     for (let col = 0; col < COLS; col++) {
-      out.push({ col, row, cell: G[row][col], center: cellCenter(col, row) });
+      out.push({
+        col,
+        row,
+        cell: G[row][col],
+        center: cellCenter(col, row),
+        size: cellSize(col, row),
+      });
     }
   }
   return out;
@@ -224,6 +429,7 @@ export function buildLaneWaypoints(): Record<string, LaneWaypoint> {
     for (let col = 0; col < COLS; col++) {
       const c = G[row][col];
       if (c.kind !== 'road') continue;
+      if (c.mergedInto) continue; // absorbed road cells carry no traffic
       const [cx, , cz] = cellCenter(col, row);
       const dirs: LaneDir[] = [];
       if (c.carriesNS) dirs.push('N', 'S');
@@ -314,19 +520,27 @@ export function buildRoadWaypoints(): Record<string, Waypoint> {
 // with connections to adjacent rings via the sidewalk corner.
 export function buildPedWaypoints(): Record<string, Waypoint> {
   const map: Record<string, Waypoint> = {};
-  const offset = SIDEWALK_CENTER_OFFSET;
 
   for (let row = 0; row < ROWS; row++) {
     for (let col = 0; col < COLS; col++) {
       const c = G[row][col];
       // Skip pure road cells (no sidewalks needed there)
       if (c.kind === 'road') continue;
-      const [cx, , cz] = cellCenter(col, row);
+      // Skip absorbed blocks — their perimeter is covered by the anchor.
+      if (c.kind === 'building' && c.mergedInto) continue;
+      const bounds =
+        c.kind === 'building' && c.mergedBounds ? c.mergedBounds : cellBounds(col, row);
+      const cx = (bounds.minX + bounds.maxX) / 2;
+      const cz = (bounds.minZ + bounds.maxZ) / 2;
+      const width = bounds.maxX - bounds.minX;
+      const depth = bounds.maxZ - bounds.minZ;
+      const offX = width / 2 - SIDEWALK_WIDTH / 2;
+      const offZ = depth / 2 - SIDEWALK_WIDTH / 2;
       const corners: Array<['nw' | 'ne' | 'sw' | 'se', Vec3]> = [
-        ['nw', [cx - offset, 0, cz - offset]],
-        ['ne', [cx + offset, 0, cz - offset]],
-        ['sw', [cx - offset, 0, cz + offset]],
-        ['se', [cx + offset, 0, cz + offset]],
+        ['nw', [cx - offX, 0, cz - offZ]],
+        ['ne', [cx + offX, 0, cz - offZ]],
+        ['sw', [cx - offX, 0, cz + offZ]],
+        ['se', [cx + offX, 0, cz + offZ]],
       ];
       for (const [side, pos] of corners) {
         const id = makeId('p', col, row, side);
@@ -350,38 +564,68 @@ export type ParkingSlot = { pos: Vec3; rotationY: number };
 
 export function buildParkingSlots(): ParkingSlot[] {
   const slots: ParkingSlot[] = [];
+  const STREET_SLOT_SPACING = 6; // meters between consecutive street-parked cars
   for (let row = 0; row < ROWS; row++) {
     for (let col = 0; col < COLS; col++) {
       const c = G[row][col];
       const [cx, , cz] = cellCenter(col, row);
+      const { width: cw, depth: cd } = cellSize(col, row);
 
       if (c.kind === 'parkingLot') {
+        // Scale the 4x3 slot grid to fit the lot with margins.
+        const usableW = cw - SIDEWALK_WIDTH * 2 - 2;
+        const usableD = cd - SIDEWALK_WIDTH * 2 - 2;
+        const stepX = usableW / 4;
+        const stepZ = usableD / 3;
         for (let i = 0; i < 4; i++) {
           for (let j = 0; j < 3; j++) {
             slots.push({
-              pos: [cx - 12 + i * 8, 0, cz - 8 + j * 8],
+              pos: [
+                cx - usableW / 2 + stepX / 2 + i * stepX,
+                0,
+                cz - usableD / 2 + stepZ / 2 + j * stepZ,
+              ],
               rotationY: 0,
             });
           }
         }
       } else if (c.kind === 'road') {
-        // Only non-intersection road cells carry street parking.
         if (c.isIntersection) continue;
+        if (c.mergedInto) continue;
         const lane = c.parkingLane;
+        if (lane === 'none') continue;
         const isNS = c.carriesNS; // vertical road
+        // Derive slot count from actual cell length; leave a small end margin.
+        const runLen = isNS ? cd : cw;
+        const nSlots = Math.floor((runLen - STREET_SLOT_SPACING) / STREET_SLOT_SPACING);
+        if (nSlots <= 0) continue;
+        const half = (nSlots - 1) / 2;
+        // Only emit street parking if there's room alongside the 8m road for a
+        // 2.4m parking lane. Narrow road strips (14m) have no shoulder and
+        // skip street parking entirely.
+        const sideRoom = isNS ? (cw - ROAD_WIDTH) / 2 : (cd - ROAD_WIDTH) / 2;
+        if (sideRoom < PARKING_LANE_WIDTH) continue;
         if (isNS) {
           if (lane === 'left' || lane === 'both') {
-            for (let i = -2; i <= 2; i++) {
+            for (let i = 0; i < nSlots; i++) {
               slots.push({
-                pos: [cx - ROAD_WIDTH / 2 - PARKING_LANE_WIDTH / 2, 0, cz + i * 6],
+                pos: [
+                  cx - ROAD_WIDTH / 2 - PARKING_LANE_WIDTH / 2,
+                  0,
+                  cz + (i - half) * STREET_SLOT_SPACING,
+                ],
                 rotationY: 0,
               });
             }
           }
           if (lane === 'right' || lane === 'both') {
-            for (let i = -2; i <= 2; i++) {
+            for (let i = 0; i < nSlots; i++) {
               slots.push({
-                pos: [cx + ROAD_WIDTH / 2 + PARKING_LANE_WIDTH / 2, 0, cz + i * 6],
+                pos: [
+                  cx + ROAD_WIDTH / 2 + PARKING_LANE_WIDTH / 2,
+                  0,
+                  cz + (i - half) * STREET_SLOT_SPACING,
+                ],
                 rotationY: Math.PI,
               });
             }
@@ -389,17 +633,25 @@ export function buildParkingSlots(): ParkingSlot[] {
         } else {
           // E-W road: parking on north/south sides
           if (lane === 'left' || lane === 'both') {
-            for (let i = -2; i <= 2; i++) {
+            for (let i = 0; i < nSlots; i++) {
               slots.push({
-                pos: [cx + i * 6, 0, cz - ROAD_WIDTH / 2 - PARKING_LANE_WIDTH / 2],
+                pos: [
+                  cx + (i - half) * STREET_SLOT_SPACING,
+                  0,
+                  cz - ROAD_WIDTH / 2 - PARKING_LANE_WIDTH / 2,
+                ],
                 rotationY: Math.PI / 2,
               });
             }
           }
           if (lane === 'right' || lane === 'both') {
-            for (let i = -2; i <= 2; i++) {
+            for (let i = 0; i < nSlots; i++) {
               slots.push({
-                pos: [cx + i * 6, 0, cz + ROAD_WIDTH / 2 + PARKING_LANE_WIDTH / 2],
+                pos: [
+                  cx + (i - half) * STREET_SLOT_SPACING,
+                  0,
+                  cz + ROAD_WIDTH / 2 + PARKING_LANE_WIDTH / 2,
+                ],
                 rotationY: -Math.PI / 2,
               });
             }
@@ -440,6 +692,60 @@ export function buildIntersections(): Intersection[] {
   return out;
 }
 
+// Position of the traffic-light post for a given approach direction at an
+// intersection. Placed on the near corner of the diagonally-adjacent block
+// cell so the light sits on a real sidewalk regardless of cell sizes. Returns
+// null if the expected corner block doesn't exist (map edge).
+export function lightPostPos(
+  intersection: Intersection,
+  dir: LaneDir,
+): { pos: Vec3; rotY: number } | null {
+  const { col, row } = intersection;
+  let nCol: number;
+  let nRow: number;
+  let xEdge: 'min' | 'max';
+  let zEdge: 'min' | 'max';
+  let rotY: number;
+  switch (dir) {
+    // For direction of travel D, the light sits on the far-right corner (from
+    // the approaching driver's perspective), on the sidewalk of the diagonally-
+    // adjacent block cell past the intersection.
+    case 'N':
+      nCol = col + 1; nRow = row - 1;
+      xEdge = 'min'; zEdge = 'max'; rotY = 0;
+      break;
+    case 'S':
+      nCol = col - 1; nRow = row + 1;
+      xEdge = 'max'; zEdge = 'min'; rotY = Math.PI;
+      break;
+    case 'E':
+      nCol = col + 1; nRow = row + 1;
+      xEdge = 'min'; zEdge = 'min'; rotY = -Math.PI / 2;
+      break;
+    case 'W':
+      nCol = col - 1; nRow = row - 1;
+      xEdge = 'max'; zEdge = 'max'; rotY = Math.PI / 2;
+      break;
+  }
+  const nCell = getCell(nCol, nRow);
+  if (nCell == null) return null;
+  // If the diagonal block has been swallowed by a super-block, skip the light
+  // rather than place it inside the merged interior.
+  if (nCell.kind === 'building' && nCell.mergedInto) return null;
+  const b = cellBounds(nCol, nRow);
+  const px = xEdge === 'min' ? b.minX + SIDEWALK_WIDTH / 2 : b.maxX - SIDEWALK_WIDTH / 2;
+  const pz = zEdge === 'min' ? b.minZ + SIDEWALK_WIDTH / 2 : b.maxZ - SIDEWALK_WIDTH / 2;
+  return { pos: [px, 0, pz], rotY };
+}
+
+// Distance from intersection cell center to the stop line along the
+// approaching lane's axis. Keeps a car clear of the intersection box.
+export function stopBackoff(intersection: Intersection, dir: LaneDir): number {
+  const { width, depth } = cellSize(intersection.col, intersection.row);
+  const half = dir === 'N' || dir === 'S' ? depth / 2 : width / 2;
+  return half + 1;
+}
+
 export const ROAD_WAYPOINTS = buildRoadWaypoints();
 export const LANE_WAYPOINTS = buildLaneWaypoints();
 export const PED_WAYPOINTS = buildPedWaypoints();
@@ -467,7 +773,7 @@ export function getPlayerSpawn(): Vec3 {
   const gs = findCellByTag('gunstore');
   if (!gs) return [0, 1, 0];
   const [x, , z] = gs.center;
-  return [x + BLOCK_SIZE / 2 - SIDEWALK_WIDTH + 1, 1, z];
+  return [x + gs.size.width / 2 - SIDEWALK_WIDTH + 1, 1, z];
 }
 
 // Target dummies live in the "range" cell

@@ -2,9 +2,9 @@ import { useFrame } from '@react-three/fiber';
 import { useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
-  BLOCK_SIZE,
   LANE_WAYPOINTS,
   getIntersection,
+  stopBackoff,
   type LaneWaypoint,
 } from '@/game/world/cityLayout';
 import { mustStopAtLight } from '@/game/world/trafficLightState';
@@ -16,7 +16,6 @@ import { useVehicleStore } from '@/game/vehicles/vehicleState';
 
 const PATROL_SPEED = 7;
 const PURSUIT_SPEED = 11;
-const STOP_BACKOFF = BLOCK_SIZE / 2 + 1;
 const DEPLOY_RANGE = 10;
 const PURSUIT_SPAWN_MIN_DIST = 60;
 const DEPLOY_ROLL_INTERVAL_S = 2;
@@ -75,15 +74,17 @@ function pickNeighborTowardPlayer(
 
 function stopLineFor(target: LaneWaypoint): [number, number, number] {
   const [tx, , tz] = target.pos;
+  const it = getIntersection(target.col, target.row);
+  const back = it ? stopBackoff(it, target.dir) : 0;
   switch (target.dir) {
     case 'N':
-      return [tx, 0, tz + STOP_BACKOFF];
+      return [tx, 0, tz + back];
     case 'S':
-      return [tx, 0, tz - STOP_BACKOFF];
+      return [tx, 0, tz - back];
     case 'E':
-      return [tx - STOP_BACKOFF, 0, tz];
+      return [tx - back, 0, tz];
     case 'W':
-      return [tx + STOP_BACKOFF, 0, tz];
+      return [tx + back, 0, tz];
   }
 }
 

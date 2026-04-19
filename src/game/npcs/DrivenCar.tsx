@@ -2,9 +2,9 @@ import { useFrame } from '@react-three/fiber';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import {
-  BLOCK_SIZE,
   LANE_WAYPOINTS,
   getIntersection,
+  stopBackoff,
   type LaneWaypoint,
 } from '@/game/world/cityLayout';
 import { mustStopAtLight } from '@/game/world/trafficLightState';
@@ -13,7 +13,6 @@ import CarModel from '@/game/vehicles/CarModel';
 import GltfBoundary from '@/game/world/GltfBoundary';
 
 const SPEED = 7;
-const STOP_BACKOFF = BLOCK_SIZE / 2 + 1;
 
 const COLORS = ['#b04a3f', '#3f6cb0', '#3fa362', '#c9a23a', '#7a4ab0', '#444c5e', '#d9d2c3'];
 
@@ -30,19 +29,22 @@ function pickNextLane(currentId: string, prevId: string | null): LaneWaypoint {
   return LANE_WAYPOINTS[list[Math.floor(Math.random() * list.length)]];
 }
 
-// Stop line = target node pushed back by half a block along the reverse of
-// the lane's flow direction. Keeps the car clear of the intersection itself.
+// Stop line = target node pushed back along the reverse of the lane's flow
+// direction by the intersection's own half-extent. Keeps the car clear of
+// the intersection box regardless of how wide the road strip is.
 function stopLineFor(target: LaneWaypoint): [number, number, number] {
   const [tx, , tz] = target.pos;
+  const it = getIntersection(target.col, target.row);
+  const back = it ? stopBackoff(it, target.dir) : 0;
   switch (target.dir) {
     case 'N':
-      return [tx, 0, tz + STOP_BACKOFF];
+      return [tx, 0, tz + back];
     case 'S':
-      return [tx, 0, tz - STOP_BACKOFF];
+      return [tx, 0, tz - back];
     case 'E':
-      return [tx - STOP_BACKOFF, 0, tz];
+      return [tx - back, 0, tz];
     case 'W':
-      return [tx + STOP_BACKOFF, 0, tz];
+      return [tx + back, 0, tz];
   }
 }
 

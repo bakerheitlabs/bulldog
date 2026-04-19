@@ -7,7 +7,15 @@ import {
   type PointerEvent,
   type WheelEvent,
 } from 'react';
-import { allCells, BLOCK_SIZE, BUILDING_FOOTPRINT, COLS, ROWS } from '@/game/world/cityLayout';
+import {
+  allCells,
+  cellBounds,
+  CITY_DEPTH,
+  CITY_MIN_X,
+  CITY_MIN_Z,
+  CITY_WIDTH,
+  SIDEWALK_WIDTH,
+} from '@/game/world/cityLayout';
 import { useGameStore } from '@/state/gameStore';
 import {
   readDrivenCarPos,
@@ -26,8 +34,7 @@ type MapView = {
 };
 
 const CELLS = allCells();
-const CITY_WIDTH = COLS * BLOCK_SIZE;
-const CITY_HEIGHT = ROWS * BLOCK_SIZE;
+const CITY_HEIGHT = CITY_DEPTH;
 const MAP_PADDING = 10;
 const MINIMAP_VIEW_MIN = 150;
 const MINIMAP_VIEW_MAX = 310;
@@ -39,10 +46,11 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+// World coords are centered on the origin; the map's origin is its top-left.
 function toMapPos(x: number, z: number) {
   return {
-    x: x + CITY_WIDTH / 2,
-    y: z + CITY_HEIGHT / 2,
+    x: x - CITY_MIN_X,
+    y: z - CITY_MIN_Z,
   };
 }
 
@@ -132,23 +140,26 @@ function cellFill(kind: string, tag?: string) {
 function RoadMarkings({
   x,
   y,
+  w,
+  h,
   carriesNS,
   carriesEW,
 }: {
   x: number;
   y: number;
+  w: number;
+  h: number;
   carriesNS: boolean;
   carriesEW: boolean;
 }) {
-  const center = BLOCK_SIZE / 2;
   return (
     <>
       {carriesNS && (
         <line
-          x1={x + center}
+          x1={x + w / 2}
           y1={y + 5}
-          x2={x + center}
-          y2={y + BLOCK_SIZE - 5}
+          x2={x + w / 2}
+          y2={y + h - 5}
           stroke="#d8c46a"
           strokeWidth={1.5}
           strokeDasharray="5 5"
@@ -157,9 +168,9 @@ function RoadMarkings({
       {carriesEW && (
         <line
           x1={x + 5}
-          y1={y + center}
-          x2={x + BLOCK_SIZE - 5}
-          y2={y + center}
+          y1={y + h / 2}
+          x2={x + w - 5}
+          y2={y + h / 2}
           stroke="#d8c46a"
           strokeWidth={1.5}
           strokeDasharray="5 5"
@@ -170,30 +181,36 @@ function RoadMarkings({
 }
 
 function MapCells({ showLabels }: { showLabels: boolean }) {
-  const buildingInset = (BLOCK_SIZE - BUILDING_FOOTPRINT) / 2;
-
   return (
     <>
       {CELLS.map(({ col, row, cell }) => {
-        const x = col * BLOCK_SIZE;
-        const y = row * BLOCK_SIZE;
+        if (cell.kind === 'road' && cell.mergedInto) return null;
+        if (cell.kind === 'building' && cell.mergedInto) return null;
+        const rawBounds =
+          cell.kind === 'building' && cell.mergedBounds
+            ? cell.mergedBounds
+            : cellBounds(col, row);
+        const x = rawBounds.minX - CITY_MIN_X;
+        const y = rawBounds.minZ - CITY_MIN_Z;
+        const w = rawBounds.maxX - rawBounds.minX;
+        const h = rawBounds.maxZ - rawBounds.minZ;
         const fill = cellFill(cell.kind, cell.kind === 'building' ? cell.tag : undefined);
 
         if (cell.kind === 'building') {
           return (
             <g key={`${col}_${row}`}>
-              <rect x={x} y={y} width={BLOCK_SIZE} height={BLOCK_SIZE} fill="#73777d" />
+              <rect x={x} y={y} width={w} height={h} fill="#73777d" />
               <rect
-                x={x + buildingInset}
-                y={y + buildingInset}
-                width={BUILDING_FOOTPRINT}
-                height={BUILDING_FOOTPRINT}
+                x={x + SIDEWALK_WIDTH}
+                y={y + SIDEWALK_WIDTH}
+                width={w - SIDEWALK_WIDTH * 2}
+                height={h - SIDEWALK_WIDTH * 2}
                 fill={fill}
               />
               {showLabels && cell.tag && (
                 <text
-                  x={x + BLOCK_SIZE / 2}
-                  y={y + BLOCK_SIZE / 2 + 5}
+                  x={x + w / 2}
+                  y={y + h / 2 + 5}
                   textAnchor="middle"
                   fontSize={18}
                   fontWeight={700}
@@ -208,22 +225,24 @@ function MapCells({ showLabels }: { showLabels: boolean }) {
 
         return (
           <g key={`${col}_${row}`}>
-            <rect x={x} y={y} width={BLOCK_SIZE} height={BLOCK_SIZE} fill={fill} />
+            <rect x={x} y={y} width={w} height={h} fill={fill} />
             {cell.kind === 'road' && (
               <RoadMarkings
                 x={x}
                 y={y}
+                w={w}
+                h={h}
                 carriesNS={cell.carriesNS}
                 carriesEW={cell.carriesEW}
               />
             )}
             {showLabels && cell.kind === 'park' && (
-              <circle cx={x + BLOCK_SIZE / 2} cy={y + BLOCK_SIZE / 2} r={8} fill="#86b77a" />
+              <circle cx={x + w / 2} cy={y + h / 2} r={8} fill="#86b77a" />
             )}
             {showLabels && cell.kind === 'parkingLot' && (
               <text
-                x={x + BLOCK_SIZE / 2}
-                y={y + BLOCK_SIZE / 2 + 5}
+                x={x + w / 2}
+                y={y + h / 2 + 5}
                 textAnchor="middle"
                 fontSize={16}
                 fontWeight={700}

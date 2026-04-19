@@ -2,11 +2,8 @@ import { useFrame } from '@react-three/fiber';
 import { useRef } from 'react';
 import * as THREE from 'three';
 import {
-  BLOCK_SIZE,
   INTERSECTIONS,
-  LANE_OFFSET,
-  ROAD_WIDTH,
-  SIDEWALK_WIDTH,
+  lightPostPos,
   type Intersection,
   type LaneDir,
 } from './cityLayout';
@@ -18,25 +15,6 @@ import { useVisibleCells } from './Chunks';
 const POST_HEIGHT = 6;
 const BULB_RADIUS = 0.35;
 const BULB_BASE_Y = POST_HEIGHT - 1.8;
-const HALF_BLOCK = BLOCK_SIZE / 2;
-const SIDE_INSET = ROAD_WIDTH / 2 + SIDEWALK_WIDTH / 2;
-
-// Where each approach's controlling light is placed relative to the
-// intersection cell center. The light sits on the far side of the intersection
-// from the approaching driver and faces back toward them.
-function lightTransform(dir: LaneDir): { pos: [number, number, number]; rotY: number } {
-  const outer = HALF_BLOCK - SIDE_INSET;
-  switch (dir) {
-    case 'N':
-      return { pos: [LANE_OFFSET, 0, -outer], rotY: 0 };
-    case 'S':
-      return { pos: [-LANE_OFFSET, 0, outer], rotY: Math.PI };
-    case 'E':
-      return { pos: [outer, 0, -LANE_OFFSET], rotY: -Math.PI / 2 };
-    case 'W':
-      return { pos: [-outer, 0, LANE_OFFSET], rotY: Math.PI / 2 };
-  }
-}
 
 function GltfPost() {
   const scene = useCityModel('trafficLight');
@@ -60,8 +38,7 @@ function PrimitivePost() {
 }
 
 function TrafficLightPost({ intersection, dir }: { intersection: Intersection; dir: LaneDir }) {
-  const { pos, rotY } = lightTransform(dir);
-  const [cx, , cz] = intersection.center;
+  const placement = lightPostPos(intersection, dir);
   const redRef = useRef<THREE.Mesh>(null);
   const yelRef = useRef<THREE.Mesh>(null);
   const grnRef = useRef<THREE.Mesh>(null);
@@ -83,8 +60,10 @@ function TrafficLightPost({ intersection, dir }: { intersection: Intersection; d
     apply(grnRef, '#58c474', next === 'green');
   });
 
+  if (!placement) return null;
+  const [px, , pz] = placement.pos;
   return (
-    <group position={[cx + pos[0], 0, cz + pos[2]]} rotation={[0, rotY, 0]}>
+    <group position={[px, 0, pz]} rotation={[0, placement.rotY, 0]}>
       <GltfBoundary fallback={<PrimitivePost />}>
         <GltfPost />
       </GltfBoundary>
