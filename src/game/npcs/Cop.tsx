@@ -1,7 +1,12 @@
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { PED_WAYPOINTS, lineOfSightClear, type Waypoint } from '@/game/world/cityLayout';
+import {
+  PED_WAYPOINTS,
+  buildingInteriorAt,
+  lineOfSightClear,
+  type Waypoint,
+} from '@/game/world/cityLayout';
 import { registerNpc } from './npcRegistry';
 import CharacterModel, { type CharacterAction } from '@/game/characters/CharacterModel';
 import GltfBoundary from '@/game/world/GltfBoundary';
@@ -12,7 +17,7 @@ import { playGunshot } from '@/game/audio/synth';
 const PATROL_SPEED = 1.2;
 const CHASE_SPEED = 3.8;
 const MAX_HP = 80;
-const SHOOT_RANGE = 22;
+const SHOOT_RANGE = 14;
 const SHOOT_COOLDOWN_S = 1.1;
 const SHOT_DAMAGE = 8;
 const SHOT_HIT_CHANCE = 0.45;
@@ -21,6 +26,42 @@ const SPAWN_NEAR_MIN = 50; // at least one city block away
 const SPAWN_NEAR_MAX = 90;
 
 const COP_VARIANT = 'characterMaleE' as const;
+const COP_RADIUS = 0.4;
+
+// Check whether a point, padded by the cop's body radius, intersects a
+// building interior. Tests the point plus 4 compass offsets — cheaper than a
+// real AABB vs circle test and more than enough to keep the model off walls.
+function blockedAt(x: number, z: number): boolean {
+  if (buildingInteriorAt(x, z)) return true;
+  if (buildingInteriorAt(x + COP_RADIUS, z)) return true;
+  if (buildingInteriorAt(x - COP_RADIUS, z)) return true;
+  if (buildingInteriorAt(x, z + COP_RADIUS)) return true;
+  if (buildingInteriorAt(x, z - COP_RADIUS)) return true;
+  return false;
+}
+
+function moveWithSlide(
+  pos: THREE.Vector3,
+  dx: number,
+  dz: number,
+): void {
+  const tryX = pos.x + dx;
+  const tryZ = pos.z + dz;
+  if (!blockedAt(tryX, tryZ)) {
+    pos.x = tryX;
+    pos.z = tryZ;
+    return;
+  }
+  // Slide along X only
+  if (!blockedAt(tryX, pos.z)) {
+    pos.x = tryX;
+    return;
+  }
+  // Slide along Z only
+  if (!blockedAt(pos.x, tryZ)) {
+    pos.z = tryZ;
+  }
+}
 
 function pickRandomWaypointId(): string {
   const ids = Object.keys(PED_WAYPOINTS);
@@ -134,7 +175,7 @@ export default function Cop({
       if (distToPlayer > SHOOT_RANGE || !canSee) {
         const dir = toPlayer.clone().normalize();
         const step = Math.min(CHASE_SPEED * dt, distToPlayer);
-        s.pos.addScaledVector(dir, step);
+        moveWithSlide(s.pos, dir.x * step, dir.z * step);
         facingDir = dir;
         moving = true;
       } else {
@@ -167,7 +208,7 @@ export default function Cop({
       } else {
         dir.normalize();
         const step = Math.min(PATROL_SPEED * dt, dist);
-        s.pos.addScaledVector(dir, step);
+        moveWithSlide(s.pos, dir.x * step, dir.z * step);
         facingDir = dir;
         moving = true;
       }

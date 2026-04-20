@@ -3,6 +3,8 @@ import Game from '@/game/Game';
 import HUD from '@/game/hud/HUD';
 import PauseMenu from '@/game/hud/PauseMenu';
 import PurchaseModal from '@/game/hud/PurchaseModal';
+import DamageVignette from '@/game/hud/DamageVignette';
+import WeaponWheel from '@/game/hud/WeaponWheel';
 
 export default function GameRoute() {
   const [paused, setPaused] = useState(false);
@@ -34,6 +36,8 @@ export default function GameRoute() {
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#0a0a10' }}>
       <Game paused={isModal} onOpenShop={openShop} />
       <HUD />
+      <DamageVignette />
+      {!isModal && <WeaponWheel />}
       {shopOpen && <PurchaseModal onClose={() => setShopOpen(false)} />}
       {paused && !shopOpen && <PauseMenu onResume={() => setPaused(false)} />}
     </div>

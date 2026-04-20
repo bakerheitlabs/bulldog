@@ -16,6 +16,7 @@ import {
   CITY_WIDTH,
   SIDEWALK_WIDTH,
 } from '@/game/world/cityLayout';
+import { SUBURBS, getSuburbBounds, sampleSpline } from '@/game/world/suburbs';
 import { useGameStore } from '@/state/gameStore';
 import {
   readDrivenCarPos,
@@ -38,9 +39,22 @@ const CITY_HEIGHT = CITY_DEPTH;
 const MAP_PADDING = 10;
 const MINIMAP_VIEW_MIN = 150;
 const MINIMAP_VIEW_MAX = 310;
-const FULL_VIEW_SIZE = Math.max(CITY_WIDTH, CITY_HEIGHT) + MAP_PADDING * 2;
+// Widen the map extent to enclose both the grid and any suburbs that sit off
+// its edges. The grid still starts at (0,0) in map coords so existing cell
+// drawing keeps its offsets; WORLD_* simply extends the viewport.
+const SUBURB_BOUNDS = getSuburbBounds();
+const WORLD_MIN_X = Math.min(0, SUBURB_BOUNDS.minX - CITY_MIN_X);
+const WORLD_MIN_Y = Math.min(0, SUBURB_BOUNDS.minZ - CITY_MIN_Z);
+const WORLD_MAX_X = Math.max(CITY_WIDTH, SUBURB_BOUNDS.maxX - CITY_MIN_X);
+const WORLD_MAX_Y = Math.max(CITY_HEIGHT, SUBURB_BOUNDS.maxZ - CITY_MIN_Z);
+const WORLD_WIDTH = WORLD_MAX_X - WORLD_MIN_X;
+const WORLD_HEIGHT = WORLD_MAX_Y - WORLD_MIN_Y;
+const FULL_VIEW_SIZE = Math.max(WORLD_WIDTH, WORLD_HEIGHT) + MAP_PADDING * 2;
 const PAUSE_MIN_VIEW_SIZE = 90;
 const PLAYER_COLOR = '#f5cb5c';
+const SUBURB_ROAD_COLOR = '#2c2f35';
+const SUBURB_ROAD_WIDTH_PX = 6;
+const SUBURB_SAMPLES = 40;
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -58,8 +72,8 @@ function boundedView(view: MapView): MapView {
   const size = clamp(view.size, PAUSE_MIN_VIEW_SIZE, FULL_VIEW_SIZE);
   return {
     size,
-    x: clamp(view.x, -MAP_PADDING, CITY_WIDTH + MAP_PADDING - size),
-    y: clamp(view.y, -MAP_PADDING, CITY_HEIGHT + MAP_PADDING - size),
+    x: clamp(view.x, WORLD_MIN_X - MAP_PADDING, WORLD_MAX_X + MAP_PADDING - size),
+    y: clamp(view.y, WORLD_MIN_Y - MAP_PADDING, WORLD_MAX_Y + MAP_PADDING - size),
   };
 }
 
@@ -180,6 +194,46 @@ function RoadMarkings({
   );
 }
 
+function SuburbLayer() {
+  const content = useMemo(() => {
+    return SUBURBS.flatMap((s) => {
+      const splinePaths = s.splines.map((spline) => {
+        const pts = sampleSpline(spline.controls, SUBURB_SAMPLES)
+          .map((sample) => {
+            const p = toMapPos(sample.pos[0], sample.pos[2]);
+            return `${p.x},${p.y}`;
+          })
+          .join(' ');
+        return (
+          <polyline
+            key={`spline_${s.id}_${spline.id}`}
+            points={pts}
+            fill="none"
+            stroke={SUBURB_ROAD_COLOR}
+            strokeWidth={SUBURB_ROAD_WIDTH_PX}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        );
+      });
+      const junctionDiscs = s.junctions.map((j) => {
+        const p = toMapPos(j.pos[0], j.pos[2]);
+        return (
+          <circle
+            key={`junction_${s.id}_${j.id}`}
+            cx={p.x}
+            cy={p.y}
+            r={j.radius}
+            fill={SUBURB_ROAD_COLOR}
+          />
+        );
+      });
+      return [...splinePaths, ...junctionDiscs];
+    });
+  }, []);
+  return <>{content}</>;
+}
+
 function MapCells({ showLabels }: { showLabels: boolean }) {
   return (
     <>
@@ -283,8 +337,16 @@ export default function CityMap({ variant }: CityMapProps) {
     if (!isMinimap) {
       return `${pauseView.x} ${pauseView.y} ${pauseView.size} ${pauseView.size}`;
     }
-    const x = clamp(player.x - minimapViewSize / 2, 0, CITY_WIDTH - minimapViewSize);
-    const y = clamp(player.y - minimapViewSize / 2, 0, CITY_HEIGHT - minimapViewSize);
+    const x = clamp(
+      player.x - minimapViewSize / 2,
+      WORLD_MIN_X,
+      WORLD_MAX_X - minimapViewSize,
+    );
+    const y = clamp(
+      player.y - minimapViewSize / 2,
+      WORLD_MIN_Y,
+      WORLD_MAX_Y - minimapViewSize,
+    );
     return `${x} ${y} ${minimapViewSize} ${minimapViewSize}`;
   }, [isMinimap, minimapViewSize, pauseView, player.x, player.y]);
 
@@ -351,13 +413,15 @@ export default function CityMap({ variant }: CityMapProps) {
 
   const wrapStyle: CSSProperties = isMinimap
     ? {
-        width: 154,
-        height: 154,
+        width: 158,
+        height: 158,
         background: 'rgba(7,8,10,0.72)',
-        border: '1px solid rgba(255,255,255,0.34)',
-        borderRadius: 8,
+        border: '1px solid rgba(255,255,255,0.14)',
+        borderRadius: 10,
         overflow: 'hidden',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+        boxShadow: '0 10px 30px rgba(0,0,0,0.45), 0 0 0 1px rgba(0,0,0,0.4)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
       }
     : {
         width: '100%',
@@ -387,13 +451,14 @@ export default function CityMap({ variant }: CityMapProps) {
         style={{ display: 'block', cursor: isMinimap ? 'default' : isDragging ? 'grabbing' : 'grab' }}
       >
         <rect
-          x={-MAP_PADDING}
-          y={-MAP_PADDING}
-          width={CITY_WIDTH + MAP_PADDING * 2}
-          height={CITY_HEIGHT + MAP_PADDING * 2}
+          x={WORLD_MIN_X - MAP_PADDING}
+          y={WORLD_MIN_Y - MAP_PADDING}
+          width={WORLD_WIDTH + MAP_PADDING * 2}
+          height={WORLD_HEIGHT + MAP_PADDING * 2}
           fill="#293b2d"
         />
         <MapCells showLabels={!isMinimap} />
+        <SuburbLayer />
         <g
           transform={`translate(${player.x} ${player.y}) rotate(${pose.heading}) scale(${markerScale})`}
         >

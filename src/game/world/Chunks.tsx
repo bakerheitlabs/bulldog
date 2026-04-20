@@ -11,6 +11,7 @@ import {
   type CellInfo,
 } from './cityLayout';
 import { useGameStore } from '@/state/gameStore';
+import { readDrivenCarPos, useVehicleStore } from '@/game/vehicles/vehicleState';
 
 const CHUNK_SIZE = 3; // cells per chunk side
 // Chunks around the player to keep mounted. 1 = 3x3 chunk block = 9x9 = 81
@@ -19,7 +20,19 @@ const CHUNK_SIZE = 3; // cells per chunk side
 const VIEW_RADIUS = 1;
 
 function playerChunk(): [number, number] {
-  const [px, , pz] = useGameStore.getState().player.position;
+  let px: number;
+  let pz: number;
+  if (useVehicleStore.getState().drivenCarId) {
+    const carPos = readDrivenCarPos();
+    if (carPos) {
+      px = carPos.x;
+      pz = carPos.z;
+    } else {
+      [px, , pz] = useGameStore.getState().player.position;
+    }
+  } else {
+    [px, , pz] = useGameStore.getState().player.position;
+  }
   const cell = worldToCell(px, pz);
   const col = cell ? cell.col : px < 0 ? 0 : COLS - 1;
   const row = cell ? cell.row : pz < 0 ? 0 : ROWS - 1;

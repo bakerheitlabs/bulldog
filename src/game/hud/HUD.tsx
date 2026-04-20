@@ -1,9 +1,276 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { starsFromHeat, useGameStore } from '@/state/gameStore';
 import { WEAPONS } from '@/game/weapons/weapons';
-import { getPrompt, subscribePrompt, type InteractionPrompt } from '@/game/interactions/interactionState';
+import {
+  getPrompt,
+  subscribePrompt,
+  type InteractionPrompt,
+} from '@/game/interactions/interactionState';
 import { readDrivenCarPos, useVehicleStore } from '@/game/vehicles/vehicleState';
+import { tokens } from '@/ui/tokens';
 import CityMap from './CityMap';
+
+const HP_SEGMENTS = 10;
+
+const panelBase: CSSProperties = {
+  background: tokens.color.panel,
+  border: `1px solid ${tokens.color.border}`,
+  borderRadius: tokens.radius.md,
+  boxShadow: tokens.shadow.panel,
+  backdropFilter: 'blur(6px)',
+  WebkitBackdropFilter: 'blur(6px)',
+  color: tokens.color.text,
+};
+
+const keycapStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 22,
+  height: 22,
+  padding: '0 6px',
+  border: `1px solid ${tokens.color.borderStrong}`,
+  borderRadius: tokens.radius.sm,
+  background: 'rgba(255,255,255,0.06)',
+  fontFamily: tokens.font.mono,
+  fontSize: 11,
+  fontWeight: 600,
+  lineHeight: 1,
+  letterSpacing: 0.5,
+  color: tokens.color.text,
+};
+
+function Keycap({ label }: { label: string }) {
+  return <span style={keycapStyle}>{label}</span>;
+}
+
+function usePrev<T>(value: T): T | undefined {
+  const ref = useRef<T | undefined>(undefined);
+  useEffect(() => {
+    ref.current = value;
+  });
+  return ref.current;
+}
+
+function hpColor(hp: number): string {
+  if (hp > 50) return tokens.color.hpHigh;
+  if (hp > 20) return tokens.color.hpMid;
+  return tokens.color.hpLow;
+}
+
+function HealthPanel({ hp }: { hp: number }) {
+  const color = hpColor(hp);
+  return (
+    <div style={{ ...panelBase, padding: '6px 10px', width: 240 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontFamily: tokens.font.mono,
+          fontSize: 10,
+          letterSpacing: 1.4,
+          textTransform: 'uppercase',
+          color: tokens.color.textMuted,
+          marginBottom: 4,
+        }}
+      >
+        <span>Health</span>
+        <span style={{ color: tokens.color.text, fontWeight: 600 }}>{hp}</span>
+      </div>
+      <div
+        style={{
+          position: 'relative',
+          height: 8,
+          borderRadius: 2,
+          background: 'rgba(255,255,255,0.08)',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            width: `${hp}%`,
+            height: '100%',
+            background: color,
+            transition: `width ${tokens.motion.med}ms ${tokens.motion.easeOut}, background ${tokens.motion.med}ms linear`,
+            boxShadow: `0 0 10px ${color}55`,
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            pointerEvents: 'none',
+          }}
+        >
+          {Array.from({ length: HP_SEGMENTS - 1 }).map((_, i) => (
+            <div
+              key={i}
+              style={{
+                flex: 1,
+                borderRight:
+                  i === HP_SEGMENTS - 2 ? 'none' : '1px solid rgba(0,0,0,0.45)',
+              }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MoneyReadout({ money }: { money: number }) {
+  return (
+    <div
+      style={{
+        ...panelBase,
+        padding: '6px 12px',
+        display: 'inline-flex',
+        alignItems: 'baseline',
+        gap: 6,
+        fontFamily: tokens.font.mono,
+        width: 240,
+        boxSizing: 'border-box',
+      }}
+    >
+      <span style={{ color: tokens.color.textMuted, fontSize: 12, letterSpacing: 1 }}>$</span>
+      <span
+        style={{
+          color: tokens.color.accent,
+          fontSize: 20,
+          fontWeight: 700,
+          fontVariantNumeric: 'tabular-nums',
+          letterSpacing: 0.5,
+          textShadow: '0 1px 0 rgba(0,0,0,0.5)',
+        }}
+      >
+        {money.toLocaleString()}
+      </span>
+    </div>
+  );
+}
+
+function WantedStars({ stars }: { stars: number }) {
+  const prev = usePrev(stars);
+  const bumped = prev != null && stars > prev;
+  const [pulse, setPulse] = useState(false);
+  useEffect(() => {
+    if (!bumped) return;
+    setPulse(true);
+    const id = window.setTimeout(() => setPulse(false), 240);
+    return () => window.clearTimeout(id);
+  }, [bumped, stars]);
+  return (
+    <div
+      style={{
+        ...panelBase,
+        padding: '4px 10px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 2,
+        fontFamily: tokens.font.mono,
+        transform: pulse ? 'scale(1.06)' : 'scale(1)',
+        transition: `transform ${tokens.motion.fast}ms ${tokens.motion.easeOut}`,
+      }}
+    >
+      {Array.from({ length: 5 }).map((_, i) => {
+        const active = i < stars;
+        return (
+          <span
+            key={i}
+            style={{
+              fontSize: 22,
+              lineHeight: 1,
+              color: active ? tokens.color.accent : 'rgba(255,255,255,0.16)',
+              textShadow: active ? tokens.shadow.glow : 'none',
+              transition: `color ${tokens.motion.fast}ms linear, text-shadow ${tokens.motion.fast}ms linear`,
+            }}
+          >
+            ★
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function StatusPanel({
+  label,
+  primary,
+  secondary,
+}: {
+  label: string;
+  primary: React.ReactNode;
+  secondary?: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        ...panelBase,
+        padding: '8px 14px',
+        minWidth: 170,
+        textAlign: 'right',
+        fontFamily: tokens.font.mono,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          letterSpacing: 1.6,
+          textTransform: 'uppercase',
+          color: tokens.color.textMuted,
+          marginBottom: 2,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 26,
+          fontWeight: 700,
+          lineHeight: 1,
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {primary}
+      </div>
+      {secondary != null && (
+        <div
+          style={{
+            fontSize: 11,
+            color: tokens.color.textMuted,
+            marginTop: 4,
+            letterSpacing: 0.8,
+          }}
+        >
+          {secondary}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InteractionPill({ prompt }: { prompt: InteractionPrompt }) {
+  return (
+    <div
+      style={{
+        ...panelBase,
+        padding: '8px 14px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 10,
+        fontFamily: tokens.font.display,
+        fontSize: 14,
+        lineHeight: 1,
+        color: tokens.color.text,
+      }}
+    >
+      <Keycap label="E" />
+      <span>{prompt.label}</span>
+    </div>
+  );
+}
 
 export default function HUD() {
   const player = useGameStore((s) => s.player);
@@ -52,9 +319,9 @@ export default function HUD() {
         position: 'absolute',
         inset: 0,
         pointerEvents: 'none',
-        fontFamily: 'system-ui, sans-serif',
-        color: '#fff',
-        textShadow: '0 1px 2px rgba(0,0,0,0.8)',
+        fontFamily: tokens.font.display,
+        color: tokens.color.text,
+        textShadow: '0 1px 2px rgba(0,0,0,0.7)',
       }}
     >
       {/* crosshair */}
@@ -67,123 +334,96 @@ export default function HUD() {
           height: 14,
           marginLeft: -7,
           marginTop: -7,
-          border: '2px solid rgba(255,255,255,0.8)',
+          border: `1.5px solid ${tokens.color.borderStrong}`,
+          borderRadius: '50%',
+          boxShadow: '0 0 4px rgba(0,0,0,0.8)',
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          width: 2,
+          height: 2,
+          marginLeft: -1,
+          marginTop: -1,
+          background: tokens.color.text,
           borderRadius: '50%',
         }}
       />
 
-      {/* bottom-left: health + money */}
-      <div style={{ position: 'absolute', bottom: 16, left: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <div
-          style={{
-            width: 220,
-            height: 18,
-            border: '1px solid rgba(255,255,255,0.4)',
-            background: 'rgba(0,0,0,0.4)',
-            position: 'relative',
-          }}
-        >
-          <div
-            style={{
-              width: `${player.health}%`,
-              height: '100%',
-              background: player.health > 50 ? '#3fa362' : player.health > 20 ? '#c9a23a' : '#b04a3f',
-            }}
-          />
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
-            HP {player.health}
-          </div>
-        </div>
-        <div style={{ fontSize: 18, fontWeight: 700, color: '#f5cb5c' }}>${player.money.toLocaleString()}</div>
-      </div>
-
-      {/* top-right: wanted stars */}
+      {/* top-right: wanted stars (conditional) + health + money */}
       <div
         style={{
           position: 'absolute',
           top: 14,
-          right: 16,
+          right: 18,
           display: 'flex',
-          gap: 4,
-          fontFamily: 'monospace',
-          fontSize: 28,
-          lineHeight: 1,
-          letterSpacing: 2,
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: 8,
         }}
       >
-        {Array.from({ length: 5 }).map((_, i) => (
-          <span
-            key={i}
-            style={{
-              color: i < stars ? '#f5cb5c' : 'rgba(255,255,255,0.18)',
-              textShadow: i < stars ? '0 0 8px rgba(245,203,92,0.7)' : 'none',
-            }}
-          >
-            ★
-          </span>
-        ))}
+        {stars > 0 && <WantedStars stars={stars} />}
+        <HealthPanel hp={player.health} />
+        <MoneyReadout money={player.money} />
       </div>
 
       {/* top-left: minimap */}
-      <div style={{ position: 'absolute', top: 12, left: 12 }}>
+      <div style={{ position: 'absolute', top: 14, left: 14 }}>
         <CityMap variant="minimap" />
       </div>
 
-      {/* bottom-right: equipped weapon + ammo, or speedometer while driving */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 16,
-          right: 16,
-          textAlign: 'right',
-          fontFamily: 'monospace',
-        }}
-      >
+      {/* bottom-right: weapon/ammo OR speedometer */}
+      <div style={{ position: 'absolute', bottom: 18, right: 18 }}>
         {drivenCarId ? (
-          <>
-            <div style={{ fontSize: 14, opacity: 0.8 }}>Driving</div>
-            <div style={{ fontSize: 28, fontWeight: 700 }}>
-              {Math.round(speedKph)} <span style={{ opacity: 0.5, fontSize: 16 }}>km/h</span>
-            </div>
-          </>
+          <StatusPanel
+            label="Speed"
+            primary={
+              <>
+                {Math.round(speedKph)}
+                <span
+                  style={{
+                    color: tokens.color.textMuted,
+                    fontSize: 13,
+                    marginLeft: 6,
+                    fontWeight: 500,
+                  }}
+                >
+                  km/h
+                </span>
+              </>
+            }
+            secondary={speedKph < 0.5 ? 'IDLE' : speedKph > 45 ? 'CRUISE' : 'DRIVE'}
+          />
         ) : equipped && ammo ? (
-          <>
-            <div style={{ fontSize: 14, opacity: 0.8 }}>{WEAPONS[equipped].name}</div>
-            <div style={{ fontSize: 28, fontWeight: 700 }}>
-              {ammo.magazine} <span style={{ opacity: 0.5, fontSize: 18 }}>/ {ammo.reserve}</span>
-            </div>
-          </>
+          <StatusPanel
+            label={WEAPONS[equipped].name}
+            primary={
+              <>
+                {ammo.magazine}
+                <span
+                  style={{
+                    color: tokens.color.textMuted,
+                    fontSize: 16,
+                    fontWeight: 500,
+                    marginLeft: 4,
+                  }}
+                >
+                  / {ammo.reserve}
+                </span>
+              </>
+            }
+            secondary={
+              ammo.magazine === 0 ? (
+                <span style={{ color: tokens.color.hpLow, letterSpacing: 1.4 }}>RELOAD</span>
+              ) : undefined
+            }
+          />
         ) : (
-          <div style={{ fontSize: 14, opacity: 0.7 }}>Unarmed</div>
+          <StatusPanel label="Weapon" primary={<span style={{ fontSize: 18 }}>Unarmed</span>} />
         )}
-      </div>
-
-      {/* controls hint (top-left, faint) */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 174,
-          left: 12,
-          maxWidth: 310,
-          fontSize: 11,
-          opacity: 0.55,
-          lineHeight: 1.4,
-          fontFamily: 'monospace',
-        }}
-      >
-        {drivenCarId
-          ? 'W/S throttle · A/D steer · E exit · Esc pause'
-          : 'WASD move · Shift sprint · Mouse look · LMB shoot · F punch · R reload · 1/2 weapon · E interact · Esc pause'}
       </div>
 
       {/* center prompt */}
@@ -191,16 +431,12 @@ export default function HUD() {
         <div
           style={{
             position: 'absolute',
-            top: '60%',
+            top: '62%',
             left: '50%',
             transform: 'translateX(-50%)',
-            padding: '6px 14px',
-            background: 'rgba(0,0,0,0.6)',
-            borderRadius: 4,
-            fontSize: 14,
           }}
         >
-          {prompt.label}
+          <InteractionPill prompt={prompt} />
         </div>
       )}
     </div>

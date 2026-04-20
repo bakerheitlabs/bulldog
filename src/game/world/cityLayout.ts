@@ -345,45 +345,134 @@ export function getCell(col: number, row: number): Cell | null {
   return G[row][col];
 }
 
-// Coarse line-of-sight check against building footprints. Samples the 2D line
-// and treats any point inside a solid building cell (cell bounds minus
-// sidewalk) as an occluder. Plaza cells are skipped since they hold no
-// buildings.
-export function lineOfSightClear(x1: number, z1: number, x2: number, z2: number): boolean {
+// 2D segment vs axis-aligned rectangle (slab / Liang-Barsky).
+// Returns true if segment (x1,z1)->(x2,z2) intersects the AABB at all.
+function segmentHitsAabb(
+  x1: number,
+  z1: number,
+  x2: number,
+  z2: number,
+  minX: number,
+  maxX: number,
+  minZ: number,
+  maxZ: number,
+): boolean {
   const dx = x2 - x1;
   const dz = z2 - z1;
-  const dist = Math.hypot(dx, dz);
-  if (dist < 0.01) return true;
-  const steps = Math.max(2, Math.ceil(dist));
-  for (let i = 1; i < steps; i++) {
-    const t = i / steps;
-    const x = x1 + dx * t;
-    const z = z1 + dz * t;
-    const loc = worldToCell(x, z);
-    if (!loc) continue;
-    const cell = getCell(loc.col, loc.row);
-    if (!cell || cell.kind !== 'building') continue;
-    if (cell.blockType === 'plaza') continue;
-    let bounds: CellBounds;
-    if (cell.mergedInto) {
-      const anchor = getCell(cell.mergedInto.col, cell.mergedInto.row);
-      if (!anchor || anchor.kind !== 'building' || !anchor.mergedBounds) continue;
-      bounds = anchor.mergedBounds;
-    } else if (cell.mergedBounds) {
-      bounds = cell.mergedBounds;
-    } else {
-      bounds = cellBounds(loc.col, loc.row);
+  let tmin = 0;
+  let tmax = 1;
+  const EPS = 1e-6;
+  if (Math.abs(dx) < EPS) {
+    if (x1 < minX || x1 > maxX) return false;
+  } else {
+    let t1 = (minX - x1) / dx;
+    let t2 = (maxX - x1) / dx;
+    if (t1 > t2) {
+      const s = t1;
+      t1 = t2;
+      t2 = s;
     }
-    if (
-      x >= bounds.minX + SIDEWALK_WIDTH &&
-      x <= bounds.maxX - SIDEWALK_WIDTH &&
-      z >= bounds.minZ + SIDEWALK_WIDTH &&
-      z <= bounds.maxZ - SIDEWALK_WIDTH
-    ) {
-      return false;
+    if (t1 > tmin) tmin = t1;
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return false;
+  }
+  if (Math.abs(dz) < EPS) {
+    if (z1 < minZ || z1 > maxZ) return false;
+  } else {
+    let t1 = (minZ - z1) / dz;
+    let t2 = (maxZ - z1) / dz;
+    if (t1 > t2) {
+      const s = t1;
+      t1 = t2;
+      t2 = s;
+    }
+    if (t1 > tmin) tmin = t1;
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return false;
+  }
+  return true;
+}
+
+// Exact line-of-sight against building interior footprints. For each building
+// cell in the grid, resolves its merged/anchor footprint, insets by
+// SIDEWALK_WIDTH to the interior rectangle, and does a 2D segment-vs-AABB
+// slab test. Returns false as soon as any building interior is pierced. The
+// merged super-block dedup keeps us from testing the same anchor multiple
+// times.
+export function lineOfSightClear(x1: number, z1: number, x2: number, z2: number): boolean {
+  if (Math.abs(x2 - x1) < 0.01 && Math.abs(z2 - z1) < 0.01) return true;
+  const visitedAnchors = new Set<string>();
+  for (let row = 0; row < ROWS; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const cell = G[row][col];
+      if (cell.kind !== 'building') continue;
+      if (cell.blockType === 'plaza') continue;
+      let anchorCol = col;
+      let anchorRow = row;
+      let bounds: CellBounds;
+      if (cell.mergedInto) {
+        anchorCol = cell.mergedInto.col;
+        anchorRow = cell.mergedInto.row;
+        const anchor = getCell(anchorCol, anchorRow);
+        if (!anchor || anchor.kind !== 'building' || !anchor.mergedBounds) continue;
+        bounds = anchor.mergedBounds;
+      } else if (cell.mergedBounds) {
+        bounds = cell.mergedBounds;
+      } else {
+        bounds = cellBounds(col, row);
+      }
+      const key = `${anchorCol},${anchorRow}`;
+      if (visitedAnchors.has(key)) continue;
+      visitedAnchors.add(key);
+      if (
+        segmentHitsAabb(
+          x1,
+          z1,
+          x2,
+          z2,
+          bounds.minX + SIDEWALK_WIDTH,
+          bounds.maxX - SIDEWALK_WIDTH,
+          bounds.minZ + SIDEWALK_WIDTH,
+          bounds.maxZ - SIDEWALK_WIDTH,
+        )
+      ) {
+        return false;
+      }
     }
   }
   return true;
+}
+
+// Returns the interior bounds of the building footprint at (x,z) if the point
+// lies inside one, else null. Uses the same footprint math as
+// lineOfSightClear (sidewalk-inset), so movement blocking and LOS stay
+// consistent.
+export function buildingInteriorAt(x: number, z: number): CellBounds | null {
+  const loc = worldToCell(x, z);
+  if (!loc) return null;
+  const cell = getCell(loc.col, loc.row);
+  if (!cell || cell.kind !== 'building') return null;
+  if (cell.blockType === 'plaza') return null;
+  let bounds: CellBounds;
+  if (cell.mergedInto) {
+    const anchor = getCell(cell.mergedInto.col, cell.mergedInto.row);
+    if (!anchor || anchor.kind !== 'building' || !anchor.mergedBounds) return null;
+    bounds = anchor.mergedBounds;
+  } else if (cell.mergedBounds) {
+    bounds = cell.mergedBounds;
+  } else {
+    bounds = cellBounds(loc.col, loc.row);
+  }
+  const interior = {
+    minX: bounds.minX + SIDEWALK_WIDTH,
+    maxX: bounds.maxX - SIDEWALK_WIDTH,
+    minZ: bounds.minZ + SIDEWALK_WIDTH,
+    maxZ: bounds.maxZ - SIDEWALK_WIDTH,
+  };
+  if (x >= interior.minX && x <= interior.maxX && z >= interior.minZ && z <= interior.maxZ) {
+    return interior;
+  }
+  return null;
 }
 
 export type CellInfo = {
