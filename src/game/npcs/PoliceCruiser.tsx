@@ -1,5 +1,11 @@
 import { useFrame } from '@react-three/fiber';
-import { useMemo, useRef, useState } from 'react';
+import {
+  CuboidCollider,
+  RigidBody,
+  type CollisionEnterPayload,
+  type RapierRigidBody,
+} from '@react-three/rapier';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
   LANE_WAYPOINTS,
@@ -9,6 +15,7 @@ import {
 } from '@/game/world/cityLayout';
 import { mustStopAtLight } from '@/game/world/trafficLightState';
 import CarModel from '@/game/vehicles/CarModel';
+import CarSmoke, { smokeColorForDamage } from '@/game/vehicles/CarSmoke';
 import GltfBoundary from '@/game/world/GltfBoundary';
 import Cop from './Cop';
 import { useGameStore } from '@/state/gameStore';
@@ -95,6 +102,7 @@ export default function PoliceCruiser({
   seed: number;
   mode?: 'patrol' | 'response';
 }) {
+  const id = `npc_cruiser_${seed}`;
   const start = useMemo(() => {
     if (mode === 'response') {
       const [px, , pz] = useGameStore.getState().player.position;
@@ -102,27 +110,27 @@ export default function PoliceCruiser({
     }
     return pickRandomLaneWp();
   }, [mode]);
-  const groupRef = useRef<THREE.Group>(null);
+  const rigid = useRef<RapierRigidBody | null>(null);
+  const tmpPos = useRef(new THREE.Vector3());
   const [deployed, setDeployed] = useState(false);
   const [deployPos, setDeployPos] = useState<[number, number, number] | null>(null);
+  const damage = useVehicleStore((s) => s.carDamage[id] ?? 0);
 
   const stateRef = useRef({
-    pos: new THREE.Vector3(...start.pos).setY(0.6),
     prevId: null as string | null,
     targetId: start.id,
     target: new THREE.Vector3(...start.pos).setY(0.6),
     rollCd: 0,
-    facing: 0,
-    initialized: false,
   });
 
   useFrame((_, dt) => {
+    const r = rigid.current;
+    if (!r) return;
     const s = stateRef.current;
-    if (deployed) return;
-
-    if (!s.initialized && groupRef.current) {
-      groupRef.current.position.copy(s.pos);
-      s.initialized = true;
+    if (deployed) {
+      const cur = r.linvel();
+      r.setLinvel({ x: 0, y: cur.y, z: 0 }, true);
+      return;
     }
 
     const heat = useGameStore.getState().wanted.heat;
@@ -130,8 +138,10 @@ export default function PoliceCruiser({
     const hostile = heat > 0 && playerHp > 0;
     const [px, , pz] = useGameStore.getState().player.position;
 
+    const t = r.translation();
+
     if (hostile) {
-      const distToPlayer = Math.hypot(s.pos.x - px, s.pos.z - pz);
+      const distToPlayer = Math.hypot(t.x - px, t.z - pz);
       if (distToPlayer <= DEPLOY_RANGE) {
         s.rollCd -= dt;
         if (s.rollCd <= 0) {
@@ -140,10 +150,14 @@ export default function PoliceCruiser({
           const prob = driving ? DEPLOY_PROB_DRIVING : DEPLOY_PROB_ON_FOOT;
           if (Math.random() < prob) {
             setDeployed(true);
-            setDeployPos([s.pos.x, 0, s.pos.z]);
+            setDeployPos([t.x, 0, t.z]);
+            const cur = r.linvel();
+            r.setLinvel({ x: 0, y: cur.y, z: 0 }, true);
             return;
           }
         }
+        const cur = r.linvel();
+        r.setLinvel({ x: 0, y: cur.y, z: 0 }, true);
         return;
       }
     }
@@ -164,12 +178,13 @@ export default function PoliceCruiser({
     }
     s.target.set(...aim);
 
-    const dir = s.target.clone().sub(s.pos);
-    dir.y = 0;
-    const dist = dir.length();
+    const dx = s.target.x - t.x;
+    const dz = s.target.z - t.z;
+    const dist = Math.hypot(dx, dz);
     if (dist < 0.6) {
       if (holding) {
-        if (groupRef.current) groupRef.current.position.copy(s.pos);
+        const cur = r.linvel();
+        r.setLinvel({ x: 0, y: cur.y, z: 0 }, true);
         return;
       }
       const next = hostile
@@ -179,16 +194,48 @@ export default function PoliceCruiser({
       s.targetId = next.id;
       return;
     }
-    dir.normalize();
+    const inv = 1 / dist;
+    const dirX = dx * inv;
+    const dirZ = dz * inv;
     const speed = hostile ? PURSUIT_SPEED : PATROL_SPEED;
-    const step = Math.min(speed * dt, dist);
-    s.pos.addScaledVector(dir, step);
-    s.facing = Math.atan2(dir.x, dir.z);
-    if (groupRef.current) {
-      groupRef.current.position.copy(s.pos);
-      groupRef.current.rotation.y = s.facing;
-    }
+    const cur = r.linvel();
+    r.setLinvel({ x: dirX * speed, y: cur.y, z: dirZ * speed }, true);
+    const yaw = Math.atan2(dirX, dirZ);
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    r.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
+    r.setAngvel({ x: 0, y: 0, z: 0 }, true);
   });
+
+  const onHit = useCallback(
+    (payload: CollisionEnterPayload) => {
+      const self = rigid.current;
+      if (!self) return;
+      const v = self.linvel();
+      const other = payload.other.rigidBody;
+      let dvx = v.x;
+      let dvz = v.z;
+      if (other) {
+        const ov = other.linvel();
+        dvx -= ov.x;
+        dvz -= ov.z;
+      }
+      const relSpeed = Math.hypot(dvx, dvz);
+      if (relSpeed < 3) return;
+      const dmg = Math.min(35, (relSpeed - 3) * 4);
+      useVehicleStore.getState().damageCarBy(id, dmg);
+    },
+    [id],
+  );
+
+  const getSmokePos = useCallback(() => {
+    const r = rigid.current;
+    if (!r) return null;
+    const t = r.translation();
+    tmpPos.current.set(t.x, t.y, t.z);
+    return tmpPos.current;
+  }, []);
+
+  const smokeColor = smokeColorForDamage(damage);
 
   const primitiveFallback = (
     <group>
@@ -209,11 +256,24 @@ export default function PoliceCruiser({
 
   return (
     <>
-      <group ref={groupRef}>
+      <RigidBody
+        ref={rigid}
+        type="dynamic"
+        colliders={false}
+        position={[start.pos[0], 0.6, start.pos[2]]}
+        enabledRotations={[false, true, false]}
+        mass={800}
+        linearDamping={0.4}
+        angularDamping={4}
+        userData={{ type: 'vehicle', id }}
+        onCollisionEnter={onHit}
+      >
+        <CuboidCollider args={[0.9, 0.45, 2]} />
         <GltfBoundary fallback={primitiveFallback}>
           <CarModel variant="carPolice" />
         </GltfBoundary>
-      </group>
+      </RigidBody>
+      {smokeColor && <CarSmoke getPos={getSmokePos} color={smokeColor} />}
       {deployed && deployPos &&
         DEPLOY_OFFSETS.map(([dx, dz], i) => (
           <Cop

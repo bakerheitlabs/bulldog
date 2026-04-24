@@ -3,7 +3,7 @@ import DrivableCar from './DrivableCar';
 import { PARKING_SLOTS } from '@/game/world/cityLayout';
 import { pickCarVariantBySeed } from '@/game/world/cityAssets';
 
-const COLORS = ['#b04a3f', '#3f6cb0', '#3fa362', '#c9a23a', '#7a4ab0', '#444c5e'];
+export const COLORS = ['#b04a3f', '#3f6cb0', '#3fa362', '#c9a23a', '#7a4ab0', '#444c5e'];
 // Cap physical drivable cars — every parking slot as a rigid body tanks frame
 // time at city-scale. Sample evenly across the slot list so cars spread over
 // the whole map instead of clustering in the first few blocks.

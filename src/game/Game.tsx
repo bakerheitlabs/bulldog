@@ -10,6 +10,8 @@ import { usePointerLook } from './player/usePointerLook';
 import Spawner from './npcs/Spawner';
 import Range from './targets/Range';
 import GunStoreCounter from './interactions/GunStoreCounter';
+import HospitalCounter from './interactions/HospitalCounter';
+import MechanicShop from './interactions/MechanicShop';
 import HitFx from './weapons/HitFx';
 import { useMeleeController } from './weapons/useMeleeController';
 import { useWeaponController } from './weapons/useWeaponController';
@@ -60,9 +62,11 @@ function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () 
         shadow-camera-bottom={-150}
       />
       <City />
-      <Spawner />
+      <Spawner paused={paused} />
       <Range />
       <GunStoreCounter onOpen={onOpenShop} />
+      <HospitalCounter />
+      <MechanicShop />
       <DrivableCars paused={paused} />
       <Player ref={playerRef} paused={paused} />
       <ThirdPersonCamera target={camTarget} />

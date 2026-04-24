@@ -7,6 +7,7 @@ const STARTING_MONEY = 1500;
 const STARTING_HEALTH = 100;
 
 type GameState = GameStoreSnapshot & {
+  godMode: boolean;
   reset: () => void;
   snapshot: () => GameStoreSnapshot;
   load: (snap: GameStoreSnapshot) => void;
@@ -22,6 +23,10 @@ type GameState = GameStoreSnapshot & {
   bumpHeat: (amount: number) => void;
   clearWanted: () => void;
   tickWanted: (deltaMs: number) => void;
+  setGodMode: (on: boolean) => void;
+  setHealth: (hp: number) => void;
+  setAmmoReserve: (id: WeaponId, reserve: number) => void;
+  setWantedStars: (stars: number) => void;
 };
 
 export const HEAT_MAX = 100;
@@ -55,7 +60,8 @@ function initialSnapshot(): GameStoreSnapshot {
 
 export const useGameStore = create<GameState>((set, get) => ({
   ...initialSnapshot(),
-  reset: () => set(initialSnapshot()),
+  godMode: false,
+  reset: () => set({ ...initialSnapshot(), godMode: false }),
   snapshot: () => {
     const s = get();
     return {
@@ -76,7 +82,10 @@ export const useGameStore = create<GameState>((set, get) => ({
   setPlayerTransform: (position, rotationY) =>
     set((s) => ({ player: { ...s.player, position, rotationY } })),
   damagePlayer: (amount) =>
-    set((s) => ({ player: { ...s.player, health: Math.max(0, s.player.health - amount) } })),
+    set((s) => {
+      if (s.godMode) return {};
+      return { player: { ...s.player, health: Math.max(0, s.player.health - amount) } };
+    }),
   addMoney: (delta) => set((s) => ({ player: { ...s.player, money: s.player.money + delta } })),
   addWeapon: (id) =>
     set((s) => {
@@ -97,6 +106,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   setEquipped: (id) => set((s) => ({ inventory: { ...s.inventory, equipped: id } })),
   consumeAmmo: (id, n) =>
     set((s) => {
+      if (s.godMode) return {};
       const cur = s.inventory.ammo[id];
       if (!cur) return {};
       return {
@@ -147,5 +157,31 @@ export const useGameStore = create<GameState>((set, get) => ({
       const next = Math.max(0, s.wanted.heat - (HEAT_DECAY_PER_SEC * deltaMs) / 1000);
       if (next === s.wanted.heat) return {};
       return { wanted: { ...s.wanted, heat: next } };
+    }),
+  setGodMode: (on) => set({ godMode: on }),
+  setHealth: (hp) =>
+    set((s) => ({ player: { ...s.player, health: Math.max(0, Math.min(100, Math.round(hp))) } })),
+  setAmmoReserve: (id, reserve) =>
+    set((s) => {
+      const def = WEAPONS[id];
+      const r = Math.max(0, Math.round(reserve));
+      const hasWeapon = s.inventory.weapons.includes(id);
+      const cur = s.inventory.ammo[id];
+      const nextEntry = cur
+        ? { magazine: def.magazine, reserve: r }
+        : { magazine: def.magazine, reserve: r };
+      return {
+        inventory: {
+          weapons: hasWeapon ? s.inventory.weapons : [...s.inventory.weapons, id],
+          equipped: s.inventory.equipped ?? id,
+          ammo: { ...s.inventory.ammo, [id]: nextEntry },
+        },
+      };
+    }),
+  setWantedStars: (stars) =>
+    set(() => {
+      const n = Math.max(0, Math.min(5, Math.round(stars)));
+      if (n === 0) return { wanted: { heat: 0, lastCrimeAt: 0 } };
+      return { wanted: { heat: n * HEAT_PER_STAR, lastCrimeAt: Date.now() } };
     }),
 }));

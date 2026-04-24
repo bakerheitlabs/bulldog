@@ -3,7 +3,7 @@ import { CapsuleCollider, RigidBody, type RapierRigidBody } from '@react-three/r
 import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useGameStore } from '@/state/gameStore';
-import { getPlayerSpawn } from '@/game/world/cityLayout';
+import { getHospitalRespawn, getPlayerSpawn } from '@/game/world/cityLayout';
 import { playFootstep } from '@/game/audio/synth';
 import {
   useVehicleStore,
@@ -88,9 +88,42 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
     [ref],
   );
 
+  // Hospital respawn: when health hits zero, wake up at the hospital — full
+  // health, wanted cleared, $500 fee (clamped to what you've got). Also exit
+  // the car so you don't respawn standing inside a moving vehicle.
+  const health = useGameStore((s) => s.player.health);
+  useEffect(() => {
+    if (health > 0) return;
+    const store = useGameStore.getState();
+    const fee = Math.min(500, store.player.money);
+    if (fee > 0) store.addMoney(-fee);
+    store.clearWanted();
+    store.setHealth(100);
+    // Skip the "place alongside the car" exit effect — we want the hospital
+    // spot, not the car's wreck.
+    wasDriving.current = false;
+    if (useVehicleStore.getState().drivenCarId) {
+      useVehicleStore.getState().exitCar();
+    }
+    const r = rigid.current;
+    if (r) {
+      const [rx, ry, rz] = getHospitalRespawn();
+      r.setBodyType(0, true);
+      r.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      r.setTranslation({ x: rx, y: ry, z: rz }, true);
+    }
+  }, [health]);
+
   useFrame(() => {
     if (!rigid.current) return;
-    if (drivenCarId) return; // kinematic while in vehicle
+    if (drivenCarId) {
+      // Keep gameStore.player.position tracking the car so NPC targeting,
+      // line-of-sight, and chunk streaming all follow the driver.
+      const carPos = readDrivenCarPos();
+      const carYaw = readDrivenCarYaw();
+      if (carPos) setPlayerTransform([carPos.x, carPos.y, carPos.z], carYaw);
+      return;
+    }
     if (paused) {
       rigid.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
       if (actionRef.current !== 'idle') {

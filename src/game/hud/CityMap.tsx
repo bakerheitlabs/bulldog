@@ -139,6 +139,7 @@ function useMapPose() {
 function cellFill(kind: string, tag?: string) {
   if (tag === 'gunstore') return '#8a3630';
   if (tag === 'range') return '#69524b';
+  if (tag === 'hospital') return '#d5d9dd';
   switch (kind) {
     case 'road':
       return '#2c2f35';
@@ -261,16 +262,16 @@ function MapCells({ showLabels }: { showLabels: boolean }) {
                 height={h - SIDEWALK_WIDTH * 2}
                 fill={fill}
               />
-              {showLabels && cell.tag && (
+              {showLabels && cell.tag && cell.tag !== 'mechanic' && (
                 <text
                   x={x + w / 2}
                   y={y + h / 2 + 5}
                   textAnchor="middle"
                   fontSize={18}
                   fontWeight={700}
-                  fill="#f5f1de"
+                  fill={cell.tag === 'hospital' ? '#c03a38' : '#f5f1de'}
                 >
-                  {cell.tag === 'gunstore' ? 'G' : 'R'}
+                  {cell.tag === 'gunstore' ? 'G' : cell.tag === 'hospital' ? 'H' : 'R'}
                 </text>
               )}
             </g>

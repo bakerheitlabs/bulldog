@@ -15,7 +15,7 @@ const PATROL_CRUISER_COUNT = 4;
 const RESPONSE_COP_COUNTS = [0, 2, 1, 2, 3, 4];
 const RESPONSE_CRUISER_COUNTS = [0, 0, 1, 2, 3, 4];
 
-export default function Spawner() {
+export default function Spawner({ paused = false }: { paused?: boolean }) {
   const peds = useMemo(() => Array.from({ length: PED_COUNT }, (_, i) => i), []);
   const cars = useMemo(() => Array.from({ length: CAR_COUNT }, (_, i) => i), []);
   const patrolCops = useMemo(
@@ -45,7 +45,7 @@ export default function Spawner() {
         <Pedestrian key={`ped_${i}`} seed={i} />
       ))}
       {cars.map((i) => (
-        <DrivenCar key={`car_${i}`} seed={i + 100} />
+        <DrivenCar key={`car_${i}`} seed={i + 100} paused={paused} />
       ))}
       {patrolCops.map((i) => (
         <Cop key={`patrol_${i}`} seed={i + 400} patrol />

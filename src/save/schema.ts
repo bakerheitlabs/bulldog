@@ -1,6 +1,6 @@
 export const SAVE_VERSION = 2;
 
-export type WeaponId = 'handgun' | 'shotgun';
+export type WeaponId = 'handgun' | 'shotgun' | 'smg';
 
 export type AmmoState = { magazine: number; reserve: number };
 

@@ -1,12 +1,18 @@
 import { useFrame } from '@react-three/fiber';
-import { CuboidCollider, RigidBody, type RapierRigidBody } from '@react-three/rapier';
-import { useEffect, useRef } from 'react';
+import {
+  CuboidCollider,
+  RigidBody,
+  type CollisionEnterPayload,
+  type RapierRigidBody,
+} from '@react-three/rapier';
+import { useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { useVehicleStore, writeDrivenCarPose } from './vehicleState';
 import { registerVehicle } from './vehicleRegistry';
 import { useKeyboard } from '@/game/player/useKeyboard';
 import { startEngine, type EngineHandle } from '@/game/audio/synth';
 import CarModel from './CarModel';
+import CarSmoke, { smokeColorForDamage } from './CarSmoke';
 import GltfBoundary from '@/game/world/GltfBoundary';
 import type { CarVariant } from '@/game/world/cityAssets';
 
@@ -73,7 +79,12 @@ export default function DrivableCar({
   const meshGroup = useRef<THREE.Group>(null);
   const keys = useKeyboard();
   const drivenCarId = useVehicleStore((s) => s.drivenCarId);
+  const storeColor = useVehicleStore((s) => s.carColors[id]);
+  const damage = useVehicleStore((s) => s.carDamage[id] ?? 0);
   const isDriven = drivenCarId === id;
+  // Primitive uses the store color or initial prop; GLTF keeps its default
+  // Kenney paint until the mechanic repaints (storeColor defined).
+  const activeColor = storeColor ?? color;
   const speedRef = useRef(0);
   const yawRef = useRef(initialRotY);
   const tmpPos = useRef(new THREE.Vector3());
@@ -163,24 +174,61 @@ export default function DrivableCar({
     engineRef.current?.setSpeed(Math.abs(s) / MAX_SPEED);
   });
 
+  const onHit = useCallback(
+    (payload: CollisionEnterPayload) => {
+      const self = rigid.current;
+      if (!self) return;
+      const v = self.linvel();
+      const other = payload.other.rigidBody;
+      let dvx = v.x;
+      let dvz = v.z;
+      if (other) {
+        const ov = other.linvel();
+        dvx -= ov.x;
+        dvz -= ov.z;
+      }
+      const relSpeed = Math.hypot(dvx, dvz);
+      const THRESHOLD = 3;
+      if (relSpeed < THRESHOLD) return;
+      const dmg = Math.min(35, (relSpeed - THRESHOLD) * 4);
+      useVehicleStore.getState().damageCarBy(id, dmg);
+    },
+    [id],
+  );
+
+  const getSmokePos = useCallback(() => {
+    const r = rigid.current;
+    if (!r) return null;
+    const t = r.translation();
+    tmpPos.current.set(t.x, t.y, t.z);
+    return tmpPos.current;
+  }, []);
+
+  const smokeColor = smokeColorForDamage(damage);
+
   return (
-    <RigidBody
-      ref={rigid}
-      colliders={false}
-      type="dynamic"
-      position={[initialPos[0], initialPos[1] + 0.6, initialPos[2]]}
-      rotation={[0, initialRotY, 0]}
-      enabledRotations={[false, true, false]}
-      mass={800}
-      linearDamping={0.4}
-      angularDamping={4}
-    >
-      <CuboidCollider args={[0.9, 0.45, 2]} />
-      <group ref={meshGroup}>
-        <GltfBoundary fallback={<PrimitiveCar color={color} isDriven={isDriven} />}>
-          <CarModel variant={variant} />
-        </GltfBoundary>
-      </group>
-    </RigidBody>
+    <>
+      <RigidBody
+        ref={rigid}
+        colliders={false}
+        type="dynamic"
+        position={[initialPos[0], initialPos[1] + 0.6, initialPos[2]]}
+        rotation={[0, initialRotY, 0]}
+        enabledRotations={[false, true, false]}
+        mass={800}
+        linearDamping={0.4}
+        angularDamping={4}
+        userData={{ type: 'vehicle', id }}
+        onCollisionEnter={onHit}
+      >
+        <CuboidCollider args={[0.9, 0.45, 2]} />
+        <group ref={meshGroup}>
+          <GltfBoundary fallback={<PrimitiveCar color={activeColor} isDriven={isDriven} />}>
+            <CarModel variant={variant} tint={storeColor} />
+          </GltfBoundary>
+        </group>
+      </RigidBody>
+      {smokeColor && <CarSmoke getPos={getSmokePos} color={smokeColor} />}
+    </>
   );
 }

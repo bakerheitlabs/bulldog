@@ -22,6 +22,8 @@ const CITY_SEED = 1;
 // player's spawn and the firing range stay stable across procedural cities.
 const GUNSTORE: [number, number] = [6, 6];
 const RANGE: [number, number] = [12, 12];
+const MECHANIC: [number, number] = [8, 6];
+const HOSPITAL: [number, number] = [4, 6];
 
 // Fixed parks + parking lots so the whole city doesn't wall-to-wall with buildings.
 const PARKS: ReadonlyArray<[number, number]> = [
@@ -54,7 +56,7 @@ export type BuildingCell = {
   kind: 'building';
   height: number;
   color: string;
-  tag?: 'gunstore' | 'range';
+  tag?: 'gunstore' | 'range' | 'mechanic' | 'hospital';
   blockType: BlockType;
   // Super-block anchor: lists absorbed (road + sibling-block) cells and the
   // merged footprint spanning all three.
@@ -195,6 +197,22 @@ function buildGrid(): Cell[][] {
           height: 12,
           color: '#7c5b3b',
           tag: 'range',
+          blockType: 'standard',
+        });
+      } else if (col === MECHANIC[0] && row === MECHANIC[1]) {
+        line.push({
+          kind: 'building',
+          height: 6,
+          color: '#3a3d44',
+          tag: 'mechanic',
+          blockType: 'standard',
+        });
+      } else if (col === HOSPITAL[0] && row === HOSPITAL[1]) {
+        line.push({
+          kind: 'building',
+          height: 10,
+          color: '#e8ecef',
+          tag: 'hospital',
           blockType: 'standard',
         });
       } else if (parks.has(key)) {
@@ -407,6 +425,7 @@ export function lineOfSightClear(x1: number, z1: number, x2: number, z2: number)
       const cell = G[row][col];
       if (cell.kind !== 'building') continue;
       if (cell.blockType === 'plaza') continue;
+      if (cell.tag === 'mechanic') continue;
       let anchorCol = col;
       let anchorRow = row;
       let bounds: CellBounds;
@@ -453,6 +472,7 @@ export function buildingInteriorAt(x: number, z: number): CellBounds | null {
   const cell = getCell(loc.col, loc.row);
   if (!cell || cell.kind !== 'building') return null;
   if (cell.blockType === 'plaza') return null;
+  if (cell.tag === 'mechanic') return null;
   let bounds: CellBounds;
   if (cell.mergedInto) {
     const anchor = getCell(cell.mergedInto.col, cell.mergedInto.row);
@@ -890,7 +910,9 @@ export function getIntersection(col: number, row: number): Intersection | null {
   return INTERSECTION_INDEX[`${col},${row}`] ?? null;
 }
 
-export function findCellByTag(tag: 'gunstore' | 'range'): CellInfo | null {
+export function findCellByTag(
+  tag: 'gunstore' | 'range' | 'mechanic' | 'hospital',
+): CellInfo | null {
   for (const info of allCells()) {
     if (info.cell.kind === 'building' && info.cell.tag === tag) return info;
   }
@@ -904,6 +926,15 @@ export function getPlayerSpawn(): Vec3 {
   if (!gs) return [0, 1, 0];
   const [x, , z] = gs.center;
   return [x + gs.size.width / 2 - SIDEWALK_WIDTH + 1, 1, z];
+}
+
+// Respawn point for death: sidewalk in front of the hospital's east face.
+// Falls back to the standard player spawn if the hospital cell is missing.
+export function getHospitalRespawn(): Vec3 {
+  const h = findCellByTag('hospital');
+  if (!h) return getPlayerSpawn();
+  const [x, , z] = h.center;
+  return [x + h.size.width / 2 - SIDEWALK_WIDTH + 1, 1, z];
 }
 
 // Target dummies live in the "range" cell

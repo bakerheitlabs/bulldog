@@ -30,6 +30,7 @@ export const MODEL_PATHS = {
   characterFemaleE: '/models/characters/character_female_e.glb',
   characterFemaleF: '/models/characters/character_female_f.glb',
   weaponPistol: '/models/weapons/Pistol.glb',
+  weaponSmg: '/models/weapons/Submachine Gun.glb',
 } as const;
 
 export type ModelKey = keyof typeof MODEL_PATHS;
@@ -73,9 +74,10 @@ export function pickPedestrianVariantBySeed(seed: number): PedestrianVariant {
   return PEDESTRIAN_VARIANTS[idx];
 }
 
-export const WEAPON_MODEL: Record<'handgun' | 'shotgun', ModelKey | null> = {
+export const WEAPON_MODEL: Record<'handgun' | 'shotgun' | 'smg', ModelKey | null> = {
   handgun: 'weaponPistol',
   shotgun: null,
+  smg: 'weaponSmg',
 };
 
 function hasSkinnedMesh(root: THREE.Object3D): boolean {

@@ -35,7 +35,22 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     spreadDeg: 8,
     reloadMs: 1800,
   },
+  smg: {
+    name: 'Submachine Gun',
+    price: 1500,
+    damage: 11,
+    range: 45,
+    fireRate: 10,
+    magazine: 30,
+    projectileCount: 1,
+    spreadDeg: 3,
+    reloadMs: 1600,
+  },
 };
 
-export const WEAPON_ORDER: WeaponId[] = ['handgun', 'shotgun'];
-export const WEAPON_HOTKEYS: Record<string, WeaponId> = { '1': 'handgun', '2': 'shotgun' };
+export const WEAPON_ORDER: WeaponId[] = ['handgun', 'shotgun', 'smg'];
+export const WEAPON_HOTKEYS: Record<string, WeaponId> = {
+  '1': 'handgun',
+  '2': 'shotgun',
+  '3': 'smg',
+};

@@ -25,7 +25,7 @@ const PLAYER_HIT_HEIGHT = 1.2;
 const SPAWN_NEAR_MIN = 50; // at least one city block away
 const SPAWN_NEAR_MAX = 90;
 
-const COP_VARIANT = 'characterMaleE' as const;
+const COP_VARIANT = 'characterMaleC' as const;
 const COP_RADIUS = 0.4;
 
 // Check whether a point, padded by the cop's body radius, intersects a

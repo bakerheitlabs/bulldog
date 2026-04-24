@@ -21,33 +21,35 @@ function brownNoiseBuffer(ctx: AudioContext, seconds: number): AudioBuffer {
   return buf;
 }
 
-export function playGunshot(kind: 'handgun' | 'shotgun') {
+export function playGunshot(kind: 'handgun' | 'shotgun' | 'smg') {
   resumeIfSuspended();
   const ctx = getAudioContext();
   const dest = getSfxNode();
   if (!ctx || !dest) return;
 
   const t0 = ctx.currentTime;
-  const isShotgun = kind === 'shotgun';
-  const duration = isShotgun ? 0.32 : 0.18;
+  const duration = kind === 'shotgun' ? 0.32 : kind === 'smg' ? 0.1 : 0.18;
 
   const noise = ctx.createBufferSource();
   noise.buffer = noiseBuffer(ctx, duration);
 
   const bandpass = ctx.createBiquadFilter();
   bandpass.type = 'bandpass';
-  bandpass.frequency.value = isShotgun ? 900 : 1800;
+  bandpass.frequency.value = kind === 'shotgun' ? 900 : kind === 'smg' ? 2400 : 1800;
   bandpass.Q.value = 0.6;
 
   const lowpass = ctx.createBiquadFilter();
   lowpass.type = 'lowpass';
-  lowpass.frequency.setValueAtTime(isShotgun ? 4000 : 6000, t0);
-  lowpass.frequency.exponentialRampToValueAtTime(isShotgun ? 180 : 400, t0 + duration);
+  lowpass.frequency.setValueAtTime(kind === 'shotgun' ? 4000 : kind === 'smg' ? 7000 : 6000, t0);
+  lowpass.frequency.exponentialRampToValueAtTime(
+    kind === 'shotgun' ? 180 : kind === 'smg' ? 500 : 400,
+    t0 + duration,
+  );
 
   const noiseGain = ctx.createGain();
-  const peak = isShotgun ? 0.9 : 0.65;
+  const peak = kind === 'shotgun' ? 0.9 : kind === 'smg' ? 0.5 : 0.65;
   noiseGain.gain.setValueAtTime(0.0001, t0);
-  noiseGain.gain.exponentialRampToValueAtTime(peak, t0 + 0.005);
+  noiseGain.gain.exponentialRampToValueAtTime(peak, t0 + 0.004);
   noiseGain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
 
   noise.connect(bandpass);
@@ -59,11 +61,17 @@ export function playGunshot(kind: 'handgun' | 'shotgun') {
 
   const thumpOsc = ctx.createOscillator();
   thumpOsc.type = 'sine';
-  thumpOsc.frequency.setValueAtTime(isShotgun ? 120 : 180, t0);
+  thumpOsc.frequency.setValueAtTime(
+    kind === 'shotgun' ? 120 : kind === 'smg' ? 220 : 180,
+    t0,
+  );
   thumpOsc.frequency.exponentialRampToValueAtTime(40, t0 + duration * 0.7);
   const thumpGain = ctx.createGain();
   thumpGain.gain.setValueAtTime(0.0001, t0);
-  thumpGain.gain.exponentialRampToValueAtTime(isShotgun ? 0.7 : 0.45, t0 + 0.008);
+  thumpGain.gain.exponentialRampToValueAtTime(
+    kind === 'shotgun' ? 0.7 : kind === 'smg' ? 0.3 : 0.45,
+    t0 + 0.008,
+  );
   thumpGain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration * 0.8);
   thumpOsc.connect(thumpGain);
   thumpGain.connect(dest);
