@@ -6,6 +6,7 @@ import { pickPedestrianVariantBySeed } from '@/game/world/cityAssets';
 import { registerNpc } from './npcRegistry';
 import CharacterModel from '@/game/characters/CharacterModel';
 import GltfBoundary from '@/game/world/GltfBoundary';
+import BloodPool from './BloodPool';
 import { useGameStore } from '@/state/gameStore';
 
 const SPEED = 1.3;
@@ -113,6 +114,7 @@ export default function Pedestrian({ seed }: { seed: number }) {
       <GltfBoundary fallback={primitiveFallback}>
         <CharacterModel variant={variant} action={action} />
       </GltfBoundary>
+      {dead && <BloodPool />}
       {!dead && hp < MAX_HP && (
         <group position={[0, 2.0, 0]}>
           <mesh>

@@ -53,6 +53,27 @@ export function raycastNpcs(
   return best;
 }
 
+// Vehicle running NPCs over — damages any alive npc within `radius` of `pos`.
+// NPCs aren't rigid bodies, so car onCollisionEnter never fires for them; the
+// caller must poll this every frame while the vehicle is moving fast.
+const _vehPos = new THREE.Vector3();
+export function vehicleRunOver(pos: THREE.Vector3, radius: number, damage: number): number {
+  _vehPos.copy(pos);
+  let hits = 0;
+  for (const n of npcs.values()) {
+    if (!n.alive) continue;
+    const p = n.getPosition();
+    const dx = p.x - _vehPos.x;
+    const dz = p.z - _vehPos.z;
+    if (dx * dx + dz * dz > radius * radius) continue;
+    const len = Math.hypot(dx, dz) || 1;
+    const hitDir = new THREE.Vector3(dx / len, 0, dz / len);
+    n.takeHit(damage, hitDir);
+    hits++;
+  }
+  return hits;
+}
+
 // Melee: damage all NPCs within a cone in front of the player.
 export function meleeHit(
   origin: THREE.Vector3,

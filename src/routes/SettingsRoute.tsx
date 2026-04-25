@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { useSettingsStore } from '@/state/settingsStore';
+import { useSettingsStore, type SpeedUnit } from '@/state/settingsStore';
 import { tokens } from '@/ui/tokens';
 
 const CONTROLS: { section: string; binds: { keys: string[]; label: string }[] }[] = [
@@ -27,6 +27,62 @@ const CONTROLS: { section: string; binds: { keys: string[]; label: string }[] }[
     section: 'System',
     binds: [{ keys: ['Esc'], label: 'Pause / Close Menu' }],
   },
+];
+
+function Segmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: readonly { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 360 }}>
+      <span>{label}</span>
+      <div
+        style={{
+          display: 'flex',
+          gap: 0,
+          border: `1px solid ${tokens.color.borderStrong}`,
+          borderRadius: tokens.radius.sm,
+          overflow: 'hidden',
+        }}
+      >
+        {options.map((opt) => {
+          const active = opt.value === value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange(opt.value)}
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                border: 'none',
+                background: active ? tokens.color.accent : 'rgba(255,255,255,0.04)',
+                color: active ? '#1a1a22' : tokens.color.text,
+                fontFamily: tokens.font.display,
+                fontWeight: active ? 700 : 500,
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </label>
+  );
+}
+
+const SPEED_UNIT_OPTIONS: readonly { value: SpeedUnit; label: string }[] = [
+  { value: 'mph', label: 'MPH' },
+  { value: 'kph', label: 'KM/H' },
 ];
 
 function Slider({
@@ -66,8 +122,16 @@ function Slider({
 
 export default function SettingsRoute() {
   const navigate = useNavigate();
-  const { mouseSensitivity, fov, masterVolume, setMouseSensitivity, setFov, setMasterVolume } =
-    useSettingsStore();
+  const {
+    mouseSensitivity,
+    fov,
+    masterVolume,
+    speedUnit,
+    setMouseSensitivity,
+    setFov,
+    setMasterVolume,
+    setSpeedUnit,
+  } = useSettingsStore();
 
   return (
     <div
@@ -107,6 +171,12 @@ export default function SettingsRoute() {
         step={0.05}
         onChange={setMasterVolume}
         format={(n) => `${Math.round(n * 100)}%`}
+      />
+      <Segmented
+        label="Speed Units"
+        value={speedUnit}
+        options={SPEED_UNIT_OPTIONS}
+        onChange={setSpeedUnit}
       />
 
       <div

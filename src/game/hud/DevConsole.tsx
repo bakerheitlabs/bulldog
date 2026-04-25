@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useGameStore } from '@/state/gameStore';
 import { WEAPONS } from '@/game/weapons/weapons';
 import type { WeaponId } from '@/save/schema';
+import { nearestLaneWaypoints } from '@/game/world/cityLayout';
+import { useDebugTrafficStore } from '@/game/npcs/debugTrafficState';
 import { tokens } from '@/ui/tokens';
 
 type Line = { kind: 'cmd' | 'ok' | 'err'; text: string };
@@ -11,9 +13,23 @@ const HELP = [
   'ammo <weapon> N     set reserve ammo (weapons: handgun, shotgun, smg)',
   'godmode             toggle unlimited health + ammo',
   'wanted 0-5          set wanted stars',
+  'time HH:MM          set world clock (24-hour)',
+  'traffic spawn [N]   spawn N debug AI cars near you (default 1, max 8)',
+  'traffic clear       remove all debug AI cars',
   'help                show this list',
   'clear               clear console output',
 ];
+
+function parseClock(s: string | undefined): number | null {
+  if (!s) return null;
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min)) return null;
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 3600 + min * 60;
+}
 
 function isWeaponId(s: string): s is WeaponId {
   return s in WEAPONS;
@@ -65,6 +81,47 @@ function runCommand(raw: string): Line[] {
       if (n == null) return [{ kind: 'err', text: 'usage: wanted 0-5' }];
       state.setWantedStars(n);
       return [{ kind: 'ok', text: `wanted → ${Math.max(0, Math.min(5, Math.round(n)))} ★` }];
+    }
+    case 'time': {
+      const sec = parseClock(args[0]);
+      if (sec == null) return [{ kind: 'err', text: 'usage: time HH:MM (24-hour)' }];
+      state.setWorldTimeSeconds(sec);
+      const hh = Math.floor(sec / 3600).toString().padStart(2, '0');
+      const mm = Math.floor((sec % 3600) / 60).toString().padStart(2, '0');
+      return [{ kind: 'ok', text: `time → ${hh}:${mm}` }];
+    }
+    case 'traffic': {
+      const sub = args[0]?.toLowerCase();
+      const traffic = useDebugTrafficStore.getState();
+      if (sub === 'clear') {
+        traffic.clear();
+        return [{ kind: 'ok', text: 'cleared debug AI cars' }];
+      }
+      if (sub === 'spawn') {
+        const n = Math.max(1, Math.min(8, Math.round(parseNumber(args[1]) ?? 1)));
+        const player = state.player.position;
+        // Skip waypoints within 6 m so the new car isn't on top of the player.
+        const wps = nearestLaneWaypoints(
+          { x: player[0], z: player[2] },
+          n,
+          6,
+        );
+        if (wps.length === 0) {
+          return [{ kind: 'err', text: 'no nearby lane waypoints found' }];
+        }
+        for (const wp of wps) traffic.spawn(wp.id);
+        return [
+          {
+            kind: 'ok',
+            text: `spawned ${wps.length} debug car(s) at: ${wps.map((w) => w.id).join(', ')}`,
+          },
+          {
+            kind: 'ok',
+            text: 'open browser console to see [ai:debug_car_*] path logs',
+          },
+        ];
+      }
+      return [{ kind: 'err', text: 'usage: traffic spawn [N] | traffic clear' }];
     }
     case 'clear':
       return [];

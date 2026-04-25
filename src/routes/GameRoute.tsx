@@ -4,6 +4,7 @@ import HUD from '@/game/hud/HUD';
 import PauseMenu from '@/game/hud/PauseMenu';
 import PurchaseModal from '@/game/hud/PurchaseModal';
 import DamageVignette from '@/game/hud/DamageVignette';
+import VehicleEntered from '@/game/hud/VehicleEntered';
 import WeaponWheel from '@/game/hud/WeaponWheel';
 import DevConsole from '@/game/hud/DevConsole';
 
@@ -51,6 +52,7 @@ export default function GameRoute() {
       <Game paused={isModal} onOpenShop={openShop} />
       <HUD />
       <DamageVignette />
+      <VehicleEntered />
       {!isModal && <WeaponWheel />}
       {shopOpen && <PurchaseModal onClose={() => setShopOpen(false)} />}
       {paused && !shopOpen && !consoleOpen && <PauseMenu onResume={() => setPaused(false)} />}

@@ -538,7 +538,12 @@ export type LaneWaypoint = Waypoint & {
 };
 
 // Lane offset from cell center: right-of-traveler side for each flow direction.
-// Three.js right-handed: facing -z ("N"), right-hand is +x.
+// Three.js right-handed coords (+x right, +y up, +z toward camera). The
+// driver's "right" is forward × up:
+//   N (-z) × +y = +x   → right side at +x (east)
+//   S (+z) × +y = -x   → right side at -x (west)
+//   E (+x) × +y = +z   → right side at +z (south)
+//   W (-x) × +y = -z   → right side at -z (north)
 function laneOffset(dir: LaneDir): [number, number] {
   switch (dir) {
     case 'N':
@@ -546,9 +551,9 @@ function laneOffset(dir: LaneDir): [number, number] {
     case 'S':
       return [-LANE_OFFSET, 0];
     case 'E':
-      return [0, -LANE_OFFSET];
-    case 'W':
       return [0, LANE_OFFSET];
+    case 'W':
+      return [0, -LANE_OFFSET];
   }
 }
 
@@ -565,8 +570,24 @@ function dirDelta(dir: LaneDir): [number, number] {
   }
 }
 
+// Car model's local +Z is forward; rotation around Y to make it face
+// along `dir`. Used by NPC car spawners so they don't start out facing the
+// wrong way and drive backwards down the lane until angular velocity
+// catches up.
+export function yawForLaneDir(dir: LaneDir): number {
+  switch (dir) {
+    case 'S':
+      return 0;
+    case 'N':
+      return Math.PI;
+    case 'E':
+      return Math.PI / 2;
+    case 'W':
+      return -Math.PI / 2;
+  }
+}
+
 const TURN_RIGHT: Record<LaneDir, LaneDir> = { N: 'E', S: 'W', E: 'S', W: 'N' };
-const TURN_LEFT: Record<LaneDir, LaneDir> = { N: 'W', S: 'E', E: 'N', W: 'S' };
 
 function laneId(col: number, row: number, dir: LaneDir) {
   return `l_${col}_${row}_${dir}`;
@@ -586,9 +607,21 @@ export function buildLaneWaypoints(): Record<string, LaneWaypoint> {
       if (c.carriesEW) dirs.push('E', 'W');
       for (const d of dirs) {
         const [ox, oz] = laneOffset(d);
+        let px = cx + ox;
+        let pz = cz + oz;
+        if (c.isIntersection) {
+          // Pull intersection waypoints back to the road-edge entry point
+          // so a right-turn arc of radius LANE_OFFSET fits inside the
+          // intersection box and lands on the destination lane line. With
+          // waypoints at the cell center the entry sits past the lane-meet
+          // corner — no curve from there avoids the opposing lane.
+          const [ddx, ddz] = dirDelta(d);
+          px -= ddx * (ROAD_WIDTH / 2);
+          pz -= ddz * (ROAD_WIDTH / 2);
+        }
         map[laneId(col, row, d)] = {
           id: laneId(col, row, d),
-          pos: [cx + ox, 0, cz + oz],
+          pos: [px, 0, pz],
           dir: d,
           col,
           row,
@@ -615,10 +648,9 @@ export function buildLaneWaypoints(): Record<string, LaneWaypoint> {
       const rNode = map[laneId(col + rdc, row + rdr, right)];
       if (rNode) node.neighbors.push(rNode.id);
 
-      const left = TURN_LEFT[dir];
-      const [ldc, ldr] = dirDelta(left);
-      const lNode = map[laneId(col + ldc, row + ldr, left)];
-      if (lNode) node.neighbors.push(lNode.id);
+      // No left turns — they cross opposing through-traffic and our AI has
+      // no yielding logic for cross-flow. Three rights = one left, so the
+      // grid stays fully reachable.
     }
   }
   // Iteratively prune dead-end nodes (no onward neighbors). Otherwise cars
@@ -781,7 +813,9 @@ export function buildParkingSlots(): ParkingSlot[] {
             }
           }
         } else {
-          // E-W road: parking on north/south sides
+          // E-W road: parking on north/south sides. Cars park facing the
+          // direction of the adjacent lane: north curb sits next to the
+          // westbound lane (face -x), south curb next to eastbound (face +x).
           if (lane === 'left' || lane === 'both') {
             for (let i = 0; i < nSlots; i++) {
               slots.push({
@@ -790,7 +824,7 @@ export function buildParkingSlots(): ParkingSlot[] {
                   0,
                   cz - ROAD_WIDTH / 2 - PARKING_LANE_WIDTH / 2,
                 ],
-                rotationY: Math.PI / 2,
+                rotationY: -Math.PI / 2,
               });
             }
           }
@@ -802,7 +836,7 @@ export function buildParkingSlots(): ParkingSlot[] {
                   0,
                   cz + ROAD_WIDTH / 2 + PARKING_LANE_WIDTH / 2,
                 ],
-                rotationY: -Math.PI / 2,
+                rotationY: Math.PI / 2,
               });
             }
           }
@@ -888,16 +922,36 @@ export function lightPostPos(
   return { pos: [px, 0, pz], rotY };
 }
 
-// Distance from intersection cell center to the stop line along the
-// approaching lane's axis. Keeps a car clear of the intersection box.
+// Distance from the intersection's lane waypoint (now at the road-edge
+// entry, ROAD_WIDTH/2 inside the cell) to the stop line. Keeps a car
+// clear of the intersection box with a 1m margin past the cell edge.
 export function stopBackoff(intersection: Intersection, dir: LaneDir): number {
   const { width, depth } = cellSize(intersection.col, intersection.row);
   const half = dir === 'N' || dir === 'S' ? depth / 2 : width / 2;
-  return half + 1;
+  return half - ROAD_WIDTH / 2 + 1;
 }
 
 export const ROAD_WAYPOINTS = buildRoadWaypoints();
 export const LANE_WAYPOINTS = buildLaneWaypoints();
+
+// Find the N closest lane waypoints to a position, optionally requiring a
+// minimum distance (so you don't spawn cars right on top of the player).
+export function nearestLaneWaypoints(
+  pos: { x: number; z: number },
+  count: number,
+  minDist = 0,
+): LaneWaypoint[] {
+  const ranked: { wp: LaneWaypoint; d: number }[] = [];
+  for (const wp of Object.values(LANE_WAYPOINTS)) {
+    const dx = wp.pos[0] - pos.x;
+    const dz = wp.pos[2] - pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < minDist) continue;
+    ranked.push({ wp, d });
+  }
+  ranked.sort((a, b) => a.d - b.d);
+  return ranked.slice(0, count).map((r) => r.wp);
+}
 export const PED_WAYPOINTS = buildPedWaypoints();
 export const PARKING_SLOTS = buildParkingSlots();
 export const INTERSECTIONS = buildIntersections();

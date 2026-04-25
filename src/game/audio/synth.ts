@@ -226,7 +226,210 @@ export type EngineHandle = {
   stop: () => void;
 };
 
-export function startEngine(): EngineHandle | null {
+// Per-vehicle tuning for the layered engine synth. Adjust to give different
+// car models distinct sonic character without changing the architecture.
+export type EngineProfile = {
+  bassFreq: number;          // base bass-osc Hz; lower = deeper rumble
+  rpmRange: number;          // pitch climb factor (multiplier = 1 + s * rpmRange)
+  masterIdle: number;        // out gain at idle
+  masterPeak: number;        // additional gain at full throttle
+  highGainMax: number;       // intake/whine gain at full throttle
+  noiseGainMax: number;      // mechanical-roar gain at full throttle
+  filterBaseHz: number;      // master LP cutoff at idle
+  filterOpenRange: number;   // additional cutoff Hz at full throttle
+  filterQPeak: number;       // additional Q at full throttle (base Q = 1.0)
+  lfoBaseHz: number;         // tremolo (firing-pulse) rate at idle
+  lfoSpeedRange: number;     // additional tremolo Hz at top speed
+  lfoDepth: number;          // tremolo modulation depth
+};
+
+export const DEFAULT_ENGINE: EngineProfile = {
+  bassFreq: 50,
+  rpmRange: 0.9,
+  masterIdle: 0.07,
+  masterPeak: 0.10,
+  highGainMax: 0.22,
+  noiseGainMax: 0.18,
+  filterBaseHz: 380,
+  filterOpenRange: 1300,
+  filterQPeak: 1.4,
+  lfoBaseHz: 9,
+  lfoSpeedRange: 16,
+  lfoDepth: 0.22,
+};
+
+export function startEngine(profile: EngineProfile = DEFAULT_ENGINE): EngineHandle | null {
+  resumeIfSuspended();
+  const ctx = getAudioContext();
+  const dest = getSfxNode();
+  if (!ctx || !dest) return null;
+
+  // Layered model:
+  //   bass   — sawtooth at profile.bassFreq, the deep block-rumble
+  //   mid    — square at 2× bass, gives the engine its body
+  //   high   — sawtooth at 4× bass, intake/whine that comes in under throttle
+  //   noise  — band-passed brown noise, mechanical roar that scales with throttle
+  //   lfo    — tremolo on the master gain at firing-rhythm rate, scales with RPM
+  //   lp     — resonant low-pass that opens up under throttle (throttle plate)
+
+  const out = ctx.createGain();
+  out.gain.value = 0.0001;
+  out.connect(dest);
+
+  const bass = ctx.createOscillator();
+  bass.type = 'sawtooth';
+  bass.frequency.value = profile.bassFreq;
+  const mid = ctx.createOscillator();
+  mid.type = 'square';
+  mid.frequency.value = profile.bassFreq * 2;
+  const high = ctx.createOscillator();
+  high.type = 'sawtooth';
+  high.frequency.value = profile.bassFreq * 4;
+
+  const bassGain = ctx.createGain();
+  bassGain.gain.value = 0.45;
+  const midGain = ctx.createGain();
+  midGain.gain.value = 0.28;
+  const highGain = ctx.createGain();
+  highGain.gain.value = 0.0; // off at idle, comes in with throttle
+
+  const noise = ctx.createBufferSource();
+  noise.buffer = brownNoiseBuffer(ctx, 4);
+  noise.loop = true;
+  const noiseBp = ctx.createBiquadFilter();
+  noiseBp.type = 'bandpass';
+  noiseBp.frequency.value = 220;
+  noiseBp.Q.value = 1.2;
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.value = 0.0;
+
+  const sum = ctx.createGain();
+  sum.gain.value = 0.5;
+  bass.connect(bassGain).connect(sum);
+  mid.connect(midGain).connect(sum);
+  high.connect(highGain).connect(sum);
+  noise.connect(noiseBp).connect(noiseGain).connect(sum);
+
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = profile.filterBaseHz;
+  lp.Q.value = 1.2;
+  sum.connect(lp);
+
+  // Tremolo: LFO modulates pulseGain.gain. AudioParam value is summed with
+  // any connected source's signal, so pulseGain swings around 1.0 by ±depth.
+  const pulseGain = ctx.createGain();
+  pulseGain.gain.value = 1.0;
+  const lfo = ctx.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = profile.lfoBaseHz;
+  const lfoDepth = ctx.createGain();
+  lfoDepth.gain.value = profile.lfoDepth;
+  lfo.connect(lfoDepth).connect(pulseGain.gain);
+  lp.connect(pulseGain).connect(out);
+
+  bass.start();
+  mid.start();
+  high.start();
+  noise.start();
+  lfo.start();
+
+  // fade in
+  out.gain.setTargetAtTime(profile.masterIdle + 0.01, ctx.currentTime, 0.15);
+
+  let stopped = false;
+  return {
+    setThrottle: (t: number) => {
+      if (stopped || !ctx) return;
+      const now = ctx.currentTime;
+      // Master output swings noticeably with throttle so flooring it
+      // actually feels louder, not just brighter.
+      out.gain.setTargetAtTime(profile.masterIdle + t * profile.masterPeak, now, 0.07);
+      // Intake whine and mechanical roar both fade in with throttle.
+      highGain.gain.setTargetAtTime(t * profile.highGainMax, now, 0.06);
+      noiseGain.gain.setTargetAtTime(t * profile.noiseGainMax, now, 0.07);
+      // Throttle plate: filter opens, resonance climbs.
+      lp.frequency.setTargetAtTime(profile.filterBaseHz + t * profile.filterOpenRange, now, 0.08);
+      lp.Q.setTargetAtTime(1.0 + t * profile.filterQPeak, now, 0.08);
+    },
+    setSpeed: (s: number) => {
+      if (stopped || !ctx) return;
+      const now = ctx.currentTime;
+      // RPM proxy: pitch scales 1× → 1+rpmRange across the speed range so the
+      // engine genuinely climbs as you go faster.
+      const rpm = 1 + s * profile.rpmRange;
+      bass.frequency.setTargetAtTime(profile.bassFreq * rpm, now, 0.1);
+      mid.frequency.setTargetAtTime(profile.bassFreq * 2 * rpm, now, 0.1);
+      high.frequency.setTargetAtTime(profile.bassFreq * 4 * rpm, now, 0.1);
+      // Firing rhythm tracks RPM — the per-cylinder pulse you feel in a
+      // real car climbing gears.
+      lfo.frequency.setTargetAtTime(profile.lfoBaseHz + s * profile.lfoSpeedRange, now, 0.15);
+    },
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      const now = ctx.currentTime;
+      out.gain.setTargetAtTime(0, now, 0.12);
+      window.setTimeout(() => {
+        try {
+          bass.stop();
+          mid.stop();
+          high.stop();
+          noise.stop();
+          lfo.stop();
+          out.disconnect();
+        } catch {
+          // already stopped
+        }
+      }, 350);
+    },
+  };
+}
+
+export function playHorn() {
+  resumeIfSuspended();
+  const ctx = getAudioContext();
+  const dest = getSfxNode();
+  if (!ctx || !dest) return;
+
+  const t0 = ctx.currentTime;
+  const dur = 0.45;
+  const fundamental = 330;
+
+  const out = ctx.createGain();
+  out.gain.setValueAtTime(0.0001, t0);
+  out.gain.exponentialRampToValueAtTime(0.32, t0 + 0.02);
+  out.gain.setValueAtTime(0.32, t0 + dur - 0.08);
+  out.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  out.connect(dest);
+
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 1800;
+  lp.Q.value = 0.8;
+  lp.connect(out);
+
+  // Two-tone car horn: a square fundamental plus a perfect-fifth above.
+  const oscs: OscillatorNode[] = [];
+  for (const ratio of [1, 1.5]) {
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.value = fundamental * ratio;
+    const g = ctx.createGain();
+    g.gain.value = ratio === 1 ? 0.45 : 0.3;
+    osc.connect(g).connect(lp);
+    osc.start(t0);
+    osc.stop(t0 + dur);
+    oscs.push(osc);
+  }
+}
+
+export type SirenHandle = { stop: () => void };
+
+// Police "yelp" siren: a sine sweeps up 800→1600 Hz over ~0.4 s, then fast
+// drops back, looped. The rapid alternation is what makes it read as a
+// siren rather than a foghorn.
+export function startSiren(): SirenHandle | null {
   resumeIfSuspended();
   const ctx = getAudioContext();
   const dest = getSfxNode();
@@ -236,62 +439,61 @@ export function startEngine(): EngineHandle | null {
   out.gain.value = 0.0001;
   out.connect(dest);
 
-  const osc1 = ctx.createOscillator();
-  osc1.type = 'sawtooth';
-  osc1.frequency.value = 55;
-  const osc2 = ctx.createOscillator();
-  osc2.type = 'square';
-  osc2.frequency.value = 82;
+  const carrier = ctx.createOscillator();
+  carrier.type = 'sawtooth';
+  carrier.frequency.value = 800;
 
-  const lp = ctx.createBiquadFilter();
-  lp.type = 'lowpass';
-  lp.frequency.value = 450;
-  lp.Q.value = 0.7;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 1200;
+  bp.Q.value = 1.5;
 
-  const mix = ctx.createGain();
-  mix.gain.value = 0.25;
+  const tone = ctx.createGain();
+  tone.gain.value = 0.32;
 
-  osc1.connect(lp);
-  osc2.connect(lp);
-  lp.connect(mix);
-  mix.connect(out);
-  osc1.start();
-  osc2.start();
+  carrier.connect(bp).connect(tone).connect(out);
 
-  // fade in
-  out.gain.setTargetAtTime(0.18, ctx.currentTime, 0.15);
+  // Schedule a yelp sweep cycle on `freq`, repeating every cycleSec.
+  const t0 = ctx.currentTime;
+  const cycleSec = 0.55;
+  const lookahead = 4; // schedule this far ahead
+  let scheduledTo = t0;
+
+  const scheduleCycles = () => {
+    const target = ctx.currentTime + lookahead;
+    while (scheduledTo < target) {
+      const a = scheduledTo;
+      const b = a + cycleSec * 0.7;
+      const c = a + cycleSec;
+      carrier.frequency.setValueAtTime(800, a);
+      carrier.frequency.exponentialRampToValueAtTime(1650, b);
+      carrier.frequency.exponentialRampToValueAtTime(800, c);
+      scheduledTo = c;
+    }
+  };
+  scheduleCycles();
+  const interval = window.setInterval(scheduleCycles, 1500);
+
+  carrier.start(t0);
+  out.gain.setTargetAtTime(0.6, t0, 0.05);
 
   let stopped = false;
   return {
-    setThrottle: (t: number) => {
-      if (stopped || !ctx) return;
-      const now = ctx.currentTime;
-      const target = 0.14 + t * 0.28;
-      out.gain.setTargetAtTime(target, now, 0.08);
-    },
-    setSpeed: (s: number) => {
-      if (stopped || !ctx) return;
-      const now = ctx.currentTime;
-      const base1 = 55 + s * 14;
-      const base2 = 82 + s * 20;
-      osc1.frequency.setTargetAtTime(base1, now, 0.1);
-      osc2.frequency.setTargetAtTime(base2, now, 0.1);
-      lp.frequency.setTargetAtTime(450 + s * 200, now, 0.12);
-    },
     stop: () => {
       if (stopped) return;
       stopped = true;
+      window.clearInterval(interval);
       const now = ctx.currentTime;
-      out.gain.setTargetAtTime(0, now, 0.12);
+      out.gain.cancelScheduledValues(now);
+      out.gain.setTargetAtTime(0, now, 0.06);
       window.setTimeout(() => {
         try {
-          osc1.stop();
-          osc2.stop();
+          carrier.stop();
           out.disconnect();
         } catch {
           // already stopped
         }
-      }, 350);
+      }, 250);
     },
   };
 }

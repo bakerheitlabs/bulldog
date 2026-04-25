@@ -9,6 +9,7 @@ import {
   useVehicleStore,
   readDrivenCarPos,
   readDrivenCarYaw,
+  clearDrivenCarPose,
 } from '@/game/vehicles/vehicleState';
 import { cameraState } from './cameraState';
 import { useKeyboard } from './useKeyboard';
@@ -18,6 +19,12 @@ import { PLAYER_VARIANT, WEAPON_MODEL } from '@/game/world/cityAssets';
 
 const SPEED = 5;
 const SPRINT = 9;
+// Stable references — @react-three/rapier reapplies every mutable RigidBody
+// prop (including `type` AND `position`) when any of them changes by ref.
+// A fresh object/array each render would override the manual setBodyType we
+// do when entering / exiting a car AND teleport the body back to spawn.
+const PLAYER_USER_DATA = { type: 'player' };
+const PLAYER_ENABLED_ROTATIONS: [boolean, boolean, boolean] = [false, false, false];
 
 const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function Player(
   { paused },
@@ -64,7 +71,9 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
       r.setTranslation({ x: 0, y: -100, z: 0 }, true);
       wasDriving.current = true;
     } else if (wasDriving.current) {
-      // exiting: place alongside the car
+      // exiting: place alongside the car. Read _drivenPos before clearing —
+      // useCarDriver's exit effect intentionally leaves it set so we can
+      // consume it here.
       const carPos = readDrivenCarPos();
       const yaw = readDrivenCarYaw();
       if (carPos) {
@@ -76,6 +85,7 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
       r.setBodyType(0, true); // 0 = Dynamic
       r.setLinvel({ x: 0, y: 0, z: 0 }, true);
       wasDriving.current = false;
+      clearDrivenCarPose();
     }
   }, [drivenCarId]);
 
@@ -199,12 +209,13 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
     <RigidBody
       ref={setRigid}
       colliders={false}
-      enabledRotations={[false, false, false]}
+      enabledRotations={PLAYER_ENABLED_ROTATIONS}
       position={spawn.current}
       mass={1}
       linearDamping={4}
       angularDamping={4}
       type="dynamic"
+      userData={PLAYER_USER_DATA}
     >
       <CapsuleCollider args={[0.5, 0.4]} />
       <group ref={meshRef} visible={!drivenCarId}>

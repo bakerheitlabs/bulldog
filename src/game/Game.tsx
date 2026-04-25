@@ -1,13 +1,14 @@
 import { Canvas } from '@react-three/fiber';
-import { Sky } from '@react-three/drei';
 import { Physics, type RapierRigidBody } from '@react-three/rapier';
 import { Suspense, useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import City from './world/City';
+import DayNightLighting from './world/DayNightLighting';
 import Player from './player/Player';
 import ThirdPersonCamera, { type CameraTarget } from './player/ThirdPersonCamera';
 import { usePointerLook } from './player/usePointerLook';
 import Spawner from './npcs/Spawner';
+import DebugTraffic from './npcs/DebugTraffic';
 import Range from './targets/Range';
 import GunStoreCounter from './interactions/GunStoreCounter';
 import HospitalCounter from './interactions/HospitalCounter';
@@ -48,21 +49,10 @@ function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () 
 
   return (
     <>
-      <Sky sunPosition={[80, 40, 30]} turbidity={4} rayleigh={1.2} />
-      <ambientLight intensity={0.5} />
-      <directionalLight
-        position={[60, 80, 30]}
-        intensity={1.1}
-        castShadow
-        shadow-mapSize-width={1024}
-        shadow-mapSize-height={1024}
-        shadow-camera-left={-150}
-        shadow-camera-right={150}
-        shadow-camera-top={150}
-        shadow-camera-bottom={-150}
-      />
+      <DayNightLighting />
       <City />
       <Spawner paused={paused} />
+      <DebugTraffic paused={paused} />
       <Range />
       <GunStoreCounter onOpen={onOpenShop} />
       <HospitalCounter />
@@ -87,6 +77,7 @@ export default function Game({
 
   const tickPlaytime = useGameStore((s) => s.tickPlaytime);
   const tickWanted = useGameStore((s) => s.tickWanted);
+  const tickWorldTime = useGameStore((s) => s.tickWorldTime);
   const lastTickRef = useRef(performance.now());
   useEffect(() => {
     if (paused) {
@@ -100,11 +91,12 @@ export default function Game({
       lastTickRef.current = now;
       tickPlaytime(dt);
       tickWanted(dt);
+      tickWorldTime(dt);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [paused, tickPlaytime, tickWanted]);
+  }, [paused, tickPlaytime, tickWanted, tickWorldTime]);
 
   useEffect(() => {
     if (paused && document.pointerLockElement) {

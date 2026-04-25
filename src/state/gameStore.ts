@@ -23,6 +23,8 @@ type GameState = GameStoreSnapshot & {
   bumpHeat: (amount: number) => void;
   clearWanted: () => void;
   tickWanted: (deltaMs: number) => void;
+  tickWorldTime: (deltaMs: number) => void;
+  setWorldTimeSeconds: (seconds: number) => void;
   setGodMode: (on: boolean) => void;
   setHealth: (hp: number) => void;
   setAmmoReserve: (id: WeaponId, reserve: number) => void;
@@ -33,6 +35,17 @@ export const HEAT_MAX = 100;
 export const HEAT_PER_STAR = HEAT_MAX / 5;
 const HEAT_DECAY_PER_SEC = 3;
 const HEAT_COOLDOWN_MS = 4000;
+
+// World time runs at 30× real time: 1 in-game hour = 2 real minutes,
+// 24 in-game hours = 48 real minutes.
+export const WORLD_TIME_RATE = 30;
+export const SECONDS_PER_DAY = 24 * 3600;
+const WORLD_TIME_START = 8 * 3600;
+
+function wrapSeconds(s: number): number {
+  const n = s % SECONDS_PER_DAY;
+  return n < 0 ? n + SECONDS_PER_DAY : n;
+}
 
 export function starsFromHeat(heat: number): number {
   if (heat <= 0) return 0;
@@ -54,6 +67,7 @@ function initialSnapshot(): GameStoreSnapshot {
     },
     world: { destroyedTargets: [] },
     wanted: { heat: 0, lastCrimeAt: 0 },
+    time: { seconds: WORLD_TIME_START },
     meta: { startedAt: Date.now(), playtimeMs: 0 },
   };
 }
@@ -75,6 +89,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       },
       world: { destroyedTargets: [...s.world.destroyedTargets] },
       wanted: { ...s.wanted },
+      time: { ...s.time },
       meta: { ...s.meta },
     };
   },
@@ -158,6 +173,12 @@ export const useGameStore = create<GameState>((set, get) => ({
       if (next === s.wanted.heat) return {};
       return { wanted: { ...s.wanted, heat: next } };
     }),
+  tickWorldTime: (deltaMs) =>
+    set((s) => ({
+      time: { seconds: wrapSeconds(s.time.seconds + (deltaMs / 1000) * WORLD_TIME_RATE) },
+    })),
+  setWorldTimeSeconds: (seconds) =>
+    set(() => ({ time: { seconds: wrapSeconds(seconds) } })),
   setGodMode: (on) => set({ godMode: on }),
   setHealth: (hp) =>
     set((s) => ({ player: { ...s.player, health: Math.max(0, Math.min(100, Math.round(hp))) } })),

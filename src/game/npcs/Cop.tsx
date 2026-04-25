@@ -10,6 +10,7 @@ import {
 import { registerNpc } from './npcRegistry';
 import CharacterModel, { type CharacterAction } from '@/game/characters/CharacterModel';
 import GltfBoundary from '@/game/world/GltfBoundary';
+import BloodPool from './BloodPool';
 import { useGameStore } from '@/state/gameStore';
 import { spawnTracer } from '@/game/weapons/HitFx';
 import { playGunshot } from '@/game/audio/synth';
@@ -253,6 +254,7 @@ export default function Cop({
           weaponVariant={dead ? null : 'weaponPistol'}
         />
       </GltfBoundary>
+      {dead && <BloodPool />}
       {!dead && hp < MAX_HP && (
         <group position={[0, 2.0, 0]}>
           <mesh>

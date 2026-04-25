@@ -11,6 +11,16 @@ const MIGRATIONS: Record<number, Migration> = {
       wanted: { heat: 0, lastCrimeAt: 0 },
     },
   }),
+  2: (raw) => ({
+    ...raw,
+    version: 3,
+    game: {
+      ...raw.game,
+      // Default loaded saves to 8:00 AM in-game so old slots come back to a
+      // bright morning rather than midnight darkness.
+      time: { seconds: 8 * 3600 },
+    },
+  }),
 };
 
 export function migrate(raw: any): SaveData {

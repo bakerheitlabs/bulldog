@@ -1,4 +1,4 @@
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export type WeaponId = 'handgun' | 'shotgun' | 'smg';
 
@@ -25,6 +25,11 @@ export type GameStoreSnapshot = {
     destroyedTargets: string[];
   };
   wanted: WantedState;
+  time: {
+    // Seconds since in-game midnight (0..86400). World time runs at 30× real
+    // time (1 in-game hour = 2 real minutes), driven by Game.tsx's tick loop.
+    seconds: number;
+  };
   meta: {
     startedAt: number;
     playtimeMs: number;

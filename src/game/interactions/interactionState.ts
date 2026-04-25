@@ -13,9 +13,14 @@ let prompt: InteractionPrompt | null = null;
 const listeners = new Set<Listener>();
 
 export function setPrompt(p: InteractionPrompt | null) {
-  if (prompt?.id === p?.id && prompt?.label === p?.label) return;
+  // Visible state (id + label) drives HUD re-renders, but onActivate is a
+  // fresh closure each frame from the producer (e.g. useVehicleInteraction
+  // captures the *currently nearest* vehicle's id). Always store the latest
+  // object so `activate()` calls the right target; only notify listeners
+  // when what they display actually changed.
+  const sameVisible = prompt?.id === p?.id && prompt?.label === p?.label;
   prompt = p;
-  listeners.forEach((l) => l());
+  if (!sameVisible) listeners.forEach((l) => l());
 }
 
 export function clearPrompt(id: string) {

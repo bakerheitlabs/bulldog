@@ -7,6 +7,7 @@ import {
   type InteractionPrompt,
 } from '@/game/interactions/interactionState';
 import { readDrivenCarPos, useVehicleStore } from '@/game/vehicles/vehicleState';
+import { useSettingsStore } from '@/state/settingsStore';
 import { tokens } from '@/ui/tokens';
 import CityMap from './CityMap';
 
@@ -116,6 +117,49 @@ function HealthPanel({ hp }: { hp: number }) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function formatClock(seconds: number): { time: string; suffix: string } {
+  const total = Math.max(0, Math.floor(seconds)) % 86400;
+  const h24 = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const suffix = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return { time: `${h12}:${m.toString().padStart(2, '0')}`, suffix };
+}
+
+function ClockReadout({ seconds }: { seconds: number }) {
+  const { time, suffix } = formatClock(seconds);
+  return (
+    <div
+      style={{
+        ...panelBase,
+        padding: '6px 12px',
+        display: 'inline-flex',
+        alignItems: 'baseline',
+        justifyContent: 'flex-end',
+        gap: 6,
+        fontFamily: tokens.font.mono,
+        width: 240,
+        boxSizing: 'border-box',
+      }}
+    >
+      <span
+        style={{
+          color: tokens.color.text,
+          fontSize: 18,
+          fontWeight: 700,
+          fontVariantNumeric: 'tabular-nums',
+          letterSpacing: 0.5,
+        }}
+      >
+        {time}
+      </span>
+      <span style={{ color: tokens.color.textMuted, fontSize: 12, letterSpacing: 1.4 }}>
+        {suffix}
+      </span>
     </div>
   );
 }
@@ -277,9 +321,11 @@ export default function HUD() {
   const inv = useGameStore((s) => s.inventory);
   const heat = useGameStore((s) => s.wanted.heat);
   const stars = starsFromHeat(heat);
+  const worldSeconds = useGameStore((s) => s.time.seconds);
   const [prompt, setPromptState] = useState<InteractionPrompt | null>(getPrompt());
   const drivenCarId = useVehicleStore((s) => s.drivenCarId);
-  const [speedKph, setSpeedKph] = useState(0);
+  const speedUnit = useSettingsStore((s) => s.speedUnit);
+  const [speedMps, setSpeedMps] = useState(0);
   const lastCarPos = useRef<{ x: number; z: number; t: number } | null>(null);
 
   useEffect(() => subscribePrompt(() => setPromptState(getPrompt())), []);
@@ -287,7 +333,7 @@ export default function HUD() {
   useEffect(() => {
     if (!drivenCarId) {
       lastCarPos.current = null;
-      setSpeedKph(0);
+      setSpeedMps(0);
       return;
     }
     let raf = 0;
@@ -300,7 +346,7 @@ export default function HUD() {
           const dz = p.z - lastCarPos.current.z;
           const dt = Math.max(1, now - lastCarPos.current.t) / 1000;
           const mps = Math.hypot(dx, dz) / dt;
-          setSpeedKph((prev) => prev * 0.7 + mps * 3.6 * 0.3);
+          setSpeedMps((prev) => prev * 0.7 + mps * 0.3);
         }
         lastCarPos.current = { x: p.x, z: p.z, t: now };
       }
@@ -309,6 +355,15 @@ export default function HUD() {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [drivenCarId]);
+
+  // Display conversion. m/s × 2.237 = mph; m/s × 3.6 = km/h. Source of truth
+  // stays in m/s so flipping the setting is instant with no state migration.
+  const speedDisplay =
+    speedUnit === 'mph' ? speedMps * 2.23694 : speedMps * 3.6;
+  const speedUnitLabel = speedUnit === 'mph' ? 'mph' : 'km/h';
+  // Cruise threshold ≈ 12.5 m/s (was 45 km/h ≈ 28 mph) — keep the same
+  // physical speed regardless of unit selection.
+  const speedTier = speedMps < 0.14 ? 'IDLE' : speedMps > 12.5 ? 'CRUISE' : 'DRIVE';
 
   const equipped = inv.equipped;
   const ammo = equipped ? inv.ammo[equipped] : null;
@@ -368,6 +423,7 @@ export default function HUD() {
         {stars > 0 && <WantedStars stars={stars} />}
         <HealthPanel hp={player.health} />
         <MoneyReadout money={player.money} />
+        <ClockReadout seconds={worldSeconds} />
       </div>
 
       {/* top-left: minimap */}
@@ -382,7 +438,7 @@ export default function HUD() {
             label="Speed"
             primary={
               <>
-                {Math.round(speedKph)}
+                {Math.round(speedDisplay)}
                 <span
                   style={{
                     color: tokens.color.textMuted,
@@ -391,11 +447,11 @@ export default function HUD() {
                     fontWeight: 500,
                   }}
                 >
-                  km/h
+                  {speedUnitLabel}
                 </span>
               </>
             }
-            secondary={speedKph < 0.5 ? 'IDLE' : speedKph > 45 ? 'CRUISE' : 'DRIVE'}
+            secondary={speedTier}
           />
         ) : equipped && ammo ? (
           <StatusPanel

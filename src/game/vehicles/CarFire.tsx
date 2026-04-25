@@ -9,58 +9,57 @@ type Particle = {
   max: number;
 };
 
-const SMOKE_COUNT = 10;
+const FIRE_COUNT = 16;
+const COLORS = ['#ffe27a', '#ff9a2b', '#ff5020', '#b02010'];
 
-export default function CarSmoke({
-  getPos,
-  color,
-}: {
-  getPos: () => THREE.Vector3 | null;
-  color: string;
-}) {
+export default function CarFire({ getPos }: { getPos: () => THREE.Vector3 | null }) {
   const particles = useRef<Particle[]>(
-    Array.from({ length: SMOKE_COUNT }, () => ({
+    Array.from({ length: FIRE_COUNT }, () => ({
       pos: new THREE.Vector3(),
       vel: new THREE.Vector3(),
-      age: Math.random() * 1.5,
-      max: 1.2 + Math.random() * 0.6,
+      age: Math.random() * 0.6,
+      max: 0.5 + Math.random() * 0.4,
     })),
   );
   const meshes = useRef<Array<THREE.Mesh | null>>([]);
   const rngVec = useMemo(() => new THREE.Vector3(), []);
+  const color = useMemo(() => new THREE.Color(), []);
 
   useFrame((_, dt) => {
     const carPos = getPos();
-    for (let i = 0; i < SMOKE_COUNT; i++) {
+    for (let i = 0; i < FIRE_COUNT; i++) {
       const p = particles.current[i];
       p.age += dt;
       if (p.age >= p.max) {
         if (!carPos) continue;
         rngVec.set(
-          (Math.random() - 0.5) * 0.5,
-          0.5 + Math.random() * 0.2,
-          (Math.random() - 0.5) * 0.5,
+          (Math.random() - 0.5) * 0.9,
+          0.3 + Math.random() * 0.3,
+          (Math.random() - 0.5) * 0.9,
         );
         p.pos.copy(carPos).add(rngVec);
         p.vel.set(
-          (Math.random() - 0.5) * 0.3,
-          0.6 + Math.random() * 0.4,
-          (Math.random() - 0.5) * 0.3,
+          (Math.random() - 0.5) * 0.5,
+          1.4 + Math.random() * 0.8,
+          (Math.random() - 0.5) * 0.5,
         );
         p.age = 0;
-        p.max = 1.2 + Math.random() * 0.6;
+        p.max = 0.5 + Math.random() * 0.4;
       } else {
         p.pos.addScaledVector(p.vel, dt);
-        p.vel.y = Math.max(0.2, p.vel.y - 0.1 * dt);
+        p.vel.y += 0.4 * dt;
       }
       const m = meshes.current[i];
       if (!m) continue;
       m.position.copy(p.pos);
       const t = p.age / p.max;
-      const scale = 0.35 + t * 1.4;
+      const scale = 0.3 + t * 0.9;
       m.scale.setScalar(scale);
       const mat = m.material as THREE.MeshBasicMaterial;
-      mat.opacity = Math.max(0, 0.55 * (1 - t));
+      const colorIdx = Math.min(COLORS.length - 1, Math.floor(t * COLORS.length));
+      color.set(COLORS[colorIdx]);
+      mat.color.copy(color);
+      mat.opacity = Math.max(0, 0.85 * (1 - t));
     }
   });
 
@@ -74,20 +73,9 @@ export default function CarSmoke({
           }}
         >
           <sphereGeometry args={[0.3, 6, 6]} />
-          <meshBasicMaterial color={color} transparent opacity={0} depthWrite={false} />
+          <meshBasicMaterial color={COLORS[0]} transparent opacity={0} depthWrite={false} />
         </mesh>
       ))}
     </group>
   );
-}
-
-export function smokeColorForDamage(damage: number): string | null {
-  if (damage >= 100) return null;
-  if (damage >= 90) return '#3a3a3a';
-  if (damage >= 65) return '#c4c4c4';
-  return null;
-}
-
-export function isCarDestroyed(damage: number): boolean {
-  return damage >= 100;
 }

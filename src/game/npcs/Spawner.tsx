@@ -51,13 +51,13 @@ export default function Spawner({ paused = false }: { paused?: boolean }) {
         <Cop key={`patrol_${i}`} seed={i + 400} patrol />
       ))}
       {patrolCruisers.map((i) => (
-        <PoliceCruiser key={`patrol_cruiser_${i}`} seed={i + 700} mode="patrol" />
+        <PoliceCruiser key={`patrol_cruiser_${i}`} seed={i + 700} mode="patrol" paused={paused} />
       ))}
       {responseCops.map((i) => (
         <Cop key={`resp_${i}`} seed={i + 500} />
       ))}
       {responseCruisers.map((i) => (
-        <PoliceCruiser key={`resp_cruiser_${i}`} seed={i + 800} mode="response" />
+        <PoliceCruiser key={`resp_cruiser_${i}`} seed={i + 800} mode="response" paused={paused} />
       ))}
     </group>
   );
