@@ -3,15 +3,16 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 
 // Single LineSegments object holding ~2500 vertical "streak" drops. The whole
-// volume snaps to the camera's XZ each frame so the player is always inside
-// the rain box; drops cycle locally — when a streak's top vertex falls below
-// `FLOOR_Y` it pops back up to the top, preserving a constant population.
+// volume snaps to the camera each frame so the player is always inside the
+// rain box (including when flying); drops cycle locally — when a streak's top
+// vertex falls below `FLOOR_Y` it pops back up to the top, preserving a
+// constant population.
 const DROP_COUNT = 2500;
 const VOLUME_HALF_X = 28;
 const VOLUME_HALF_Z = 28;
-const VOLUME_TOP_Y = 32;
-const VOLUME_BOTTOM_Y = -2;
-const FLOOR_Y = -4;
+const VOLUME_TOP_Y = 18;
+const VOLUME_BOTTOM_Y = -16;
+const FLOOR_Y = -18;
 const STREAK_LENGTH = 0.55;
 const FALL_SPEED = 22;
 const DROP_COLOR = '#bcc6d0';
@@ -65,10 +66,10 @@ export default function Rain({ active }: { active: boolean }) {
     if (!group) return;
     group.visible = active;
     if (!active) return;
-    // Snap the rain volume to the camera's planar position. Y stays in world
-    // space so streaks always fall toward the actual ground.
+    // Snap the rain volume to the camera so the player is always inside it,
+    // including at flight altitude.
     const cam = state.camera;
-    group.position.set(cam.position.x, 0, cam.position.z);
+    group.position.set(cam.position.x, cam.position.y, cam.position.z);
 
     const arr = segments.geometry.attributes.position.array as Float32Array;
     const dy = -FALL_SPEED * Math.min(dt, 1 / 30);

@@ -20,7 +20,7 @@ const HELP = [
   'godmode             toggle unlimited health + ammo',
   'wanted 0-5          set wanted stars',
   'time HH:MM          set world clock (24-hour)',
-  'weather <type>      sunny | cloudy | rain | storm',
+  'weather <type> [h]  sunny | cloudy | rain | storm; optional duration in hours',
   'traffic spawn [N]   spawn N debug AI cars near you (default 1, max 8)',
   'traffic clear       remove all debug AI cars',
   `teleport <dest>     teleport to: ${TELEPORT_DESTINATIONS.join(' | ')}`,
@@ -106,11 +106,29 @@ function runCommand(raw: string): Line[] {
       const w = args[0]?.toLowerCase();
       if (!w || !isWeatherType(w)) {
         return [
-          { kind: 'err', text: `usage: weather <${WEATHER_TYPES.join('|')}>` },
+          {
+            kind: 'err',
+            text: `usage: weather <${WEATHER_TYPES.join('|')}> [hours]`,
+          },
         ];
       }
-      state.setWeather(w);
-      return [{ kind: 'ok', text: `weather → ${w}` }];
+      // Duration is optional. Without it we still want a "real" spell rather
+      // than a one-frame blip, so default to 2h (middle of the short bucket).
+      let hours = 2;
+      if (args[1] != null) {
+        const n = parseNumber(args[1]);
+        if (n == null || n <= 0) {
+          return [{ kind: 'err', text: 'usage: weather <type> [hours] — hours must be > 0' }];
+        }
+        hours = n;
+      }
+      state.overrideWeather(w, hours * 3600);
+      return [
+        {
+          kind: 'ok',
+          text: `weather → ${w} for ${hours}h`,
+        },
+      ];
     }
     case 'traffic': {
       const sub = args[0]?.toLowerCase();

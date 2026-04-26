@@ -355,6 +355,16 @@ export function useFitToBox(scene: THREE.Object3D, target: { w: number; h: numbe
   }, [scene, target.w, target.h, target.d]);
 }
 
+// Kick off GLB downloads as soon as this module is imported. Without this, the
+// first time a Pedestrian / Car / Building mounts a not-yet-loaded variant, its
+// GltfBoundary's <Suspense> shows the primitive fallback (capsule for peds,
+// box for cars) until the GLB resolves — which reads as "stuck in low LOD"
+// when you turn a corner and a fresh ped/car comes into view. Preloading
+// guarantees the cache is warm before any consumer renders.
+for (const path of Object.values(MODEL_PATHS)) {
+  useGLTF.preload(path);
+}
+
 export function useLogGltfLoadErrors() {
   useEffect(() => {
     const onError = (e: ErrorEvent) => {

@@ -19,6 +19,10 @@ type VehicleState = {
   // siren tone (only for the player-driven cruiser — AI cruisers stay silent
   // to avoid an always-on chorus when multiple are pursuing).
   sirenActive: Record<string, boolean>;
+  // Manual headlight override for the driven car. Headlights are on whenever
+  // it's night OR this flag is set, so L lets the player switch them on in
+  // daylight without disabling the night auto-on behavior.
+  headlightsManual: boolean;
   lastEnteredBanner: EnteredBanner | null;
   enterCar: (id: string) => void;
   exitCar: () => void;
@@ -29,6 +33,7 @@ type VehicleState = {
   resetCarDamage: (id: string) => void;
   toggleSiren: (id: string) => void;
   setSiren: (id: string, on: boolean) => void;
+  toggleHeadlights: () => void;
   showVehicleEntered: (brand: string, model: string) => void;
 };
 
@@ -38,6 +43,7 @@ export const useVehicleStore = create<VehicleState>((set) => ({
   carColors: {},
   carDamage: {},
   sirenActive: {},
+  headlightsManual: false,
   lastEnteredBanner: null,
   enterCar: (id) => set({ drivenCarId: id, drivenPlaneId: null }),
   exitCar: () => set({ drivenCarId: null }),
@@ -68,6 +74,7 @@ export const useVehicleStore = create<VehicleState>((set) => ({
       if (!!s.sirenActive[id] === on) return {};
       return { sirenActive: { ...s.sirenActive, [id]: on } };
     }),
+  toggleHeadlights: () => set((s) => ({ headlightsManual: !s.headlightsManual })),
   showVehicleEntered: (brand, model) =>
     set({ lastEnteredBanner: { brand, model, at: Date.now() } }),
 }));

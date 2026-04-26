@@ -1,13 +1,32 @@
 import { create } from 'zustand';
 import { WEAPONS } from '@/game/weapons/weapons';
 import type { GameStoreSnapshot, WeaponId, WeatherType } from '@/save/schema';
+import {
+  buildSchedule,
+  mulberry32,
+  type WeatherSpell,
+} from '@/game/world/weatherForecast';
 
 const PLAYER_START_POS: [number, number, number] = [0, 1, 0];
 const STARTING_MONEY = 1500;
 const STARTING_HEALTH = 100;
 
+// In-memory weather schedule. Not part of the saved snapshot — only
+// `weather.type` persists across saves. On load we rehydrate this from the
+// saved type and a fresh random duration so play resumes coherently without
+// bumping the save schema.
+type WeatherSchedule = {
+  current: WeatherSpell;
+  // Real (not in-game) seconds elapsed in the current spell, scaled by
+  // WORLD_TIME_RATE before we accumulate. Tracking elapsed separately means
+  // dev-console time skips don't accidentally fast-forward weather.
+  elapsedSec: number;
+  upcoming: WeatherSpell[];
+};
+
 type GameState = GameStoreSnapshot & {
   godMode: boolean;
+  weatherSchedule: WeatherSchedule;
   reset: () => void;
   snapshot: () => GameStoreSnapshot;
   load: (snap: GameStoreSnapshot) => void;
@@ -26,6 +45,14 @@ type GameState = GameStoreSnapshot & {
   tickWorldTime: (deltaMs: number) => void;
   setWorldTimeSeconds: (seconds: number) => void;
   setWeather: (type: WeatherType) => void;
+  // Replace the current spell with a custom override. Upcoming spells are
+  // left intact so the regular schedule resumes once the override expires.
+  overrideWeather: (type: WeatherType, durationSec: number) => void;
+  // Re-roll the entire schedule, optionally pinning the first spell's type.
+  regenerateWeatherSchedule: (opts?: { seedType?: WeatherType }) => void;
+  // Advance elapsed time within the current spell; rolls over when the
+  // duration is met. Pass *in-game* seconds (i.e. real seconds × world rate).
+  tickWeather: (gameSeconds: number) => void;
   setGodMode: (on: boolean) => void;
   setHealth: (hp: number) => void;
   setAmmoReserve: (id: WeaponId, reserve: number) => void;
@@ -53,6 +80,15 @@ export function starsFromHeat(heat: number): number {
   return Math.min(5, Math.ceil(heat / HEAT_PER_STAR));
 }
 
+// Number of upcoming spells we keep buffered. The forecast UI renders ~6.
+const UPCOMING_BUFFER = 8;
+
+function freshSchedule(seedType?: WeatherType): WeatherSchedule {
+  const rng = mulberry32((Math.random() * 0x7fffffff) >>> 0);
+  const { current, upcoming } = buildSchedule(rng, UPCOMING_BUFFER, seedType);
+  return { current, upcoming, elapsedSec: 0 };
+}
+
 function initialSnapshot(): GameStoreSnapshot {
   return {
     player: {
@@ -77,7 +113,9 @@ function initialSnapshot(): GameStoreSnapshot {
 export const useGameStore = create<GameState>((set, get) => ({
   ...initialSnapshot(),
   godMode: false,
-  reset: () => set({ ...initialSnapshot(), godMode: false }),
+  weatherSchedule: freshSchedule('sunny'),
+  reset: () =>
+    set({ ...initialSnapshot(), godMode: false, weatherSchedule: freshSchedule('sunny') }),
   snapshot: () => {
     const s = get();
     return {
@@ -96,7 +134,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       meta: { ...s.meta },
     };
   },
-  load: (snap) => set({ ...snap }),
+  load: (snap) =>
+    set({ ...snap, weatherSchedule: freshSchedule(snap.weather.type) }),
   setPlayerTransform: (position, rotationY) =>
     set((s) => ({ player: { ...s.player, position, rotationY } })),
   damagePlayer: (amount) =>
@@ -182,7 +221,78 @@ export const useGameStore = create<GameState>((set, get) => ({
     })),
   setWorldTimeSeconds: (seconds) =>
     set(() => ({ time: { seconds: wrapSeconds(seconds) } })),
-  setWeather: (type) => set({ weather: { type } }),
+  setWeather: (type) =>
+    set((s) => {
+      if (s.weather.type === type) return {};
+      // Keep the schedule in sync so a forced type swap (e.g. from the
+      // scheduler at spell rollover, or a save-load reconciling) doesn't leave
+      // weather.type and weatherSchedule.current.type drifting apart.
+      const cur = s.weatherSchedule.current;
+      return {
+        weather: { type },
+        weatherSchedule:
+          cur.type === type
+            ? s.weatherSchedule
+            : { ...s.weatherSchedule, current: { ...cur, type } },
+      };
+    }),
+  overrideWeather: (type, durationSec) =>
+    set((s) => ({
+      weather: { type },
+      weatherSchedule: {
+        ...s.weatherSchedule,
+        current: { type, durationSec: Math.max(60, durationSec) },
+        elapsedSec: 0,
+      },
+    })),
+  regenerateWeatherSchedule: (opts) =>
+    set(() => {
+      const next = freshSchedule(opts?.seedType);
+      return { weather: { type: next.current.type }, weatherSchedule: next };
+    }),
+  tickWeather: (gameSeconds) =>
+    set((s) => {
+      if (gameSeconds <= 0) return {};
+      const sched = s.weatherSchedule;
+      let elapsed = sched.elapsedSec + gameSeconds;
+      let current = sched.current;
+      let upcoming = sched.upcoming;
+      let typeChanged = false;
+      // A single tick can theoretically span multiple spells (e.g. a long
+      // pause + tab refocus). Drain the queue in a loop instead of assuming
+      // one rollover per tick.
+      while (elapsed >= current.durationSec) {
+        elapsed -= current.durationSec;
+        if (upcoming.length === 0) {
+          // Schedule exhausted — re-roll a fresh tail. This is rare in normal
+          // play (we keep an 8-spell buffer ≈ ~30 in-game hours of forecast),
+          // but covers the edge case so we never get stuck on an ended spell.
+          const refill = freshSchedule(current.type);
+          current = refill.current;
+          upcoming = refill.upcoming;
+          typeChanged = true;
+          continue;
+        }
+        const next = upcoming[0];
+        // Top up the buffer so the forecast UI keeps a consistent depth of
+        // slots ahead of "now". buildSchedule with count=1 returns one spell
+        // in `upcoming`, with `current` pinned to the prev type so we get a
+        // followup that respects the no-immediate-repeat rule.
+        const rng = mulberry32((Math.random() * 0x7fffffff) >>> 0);
+        const tail = buildSchedule(
+          rng,
+          1,
+          upcoming[upcoming.length - 1]?.type ?? next.type,
+        );
+        upcoming = [...upcoming.slice(1), tail.upcoming[0]];
+        if (next.type !== current.type) typeChanged = true;
+        current = next;
+      }
+      return {
+        weatherSchedule: { current, upcoming, elapsedSec: elapsed },
+        ...(typeChanged ? { weather: { type: current.type } } : {}),
+      };
+    }),
   setGodMode: (on) => set({ godMode: on }),
   setHealth: (hp) =>
     set((s) => ({ player: { ...s.player, health: Math.max(0, Math.min(100, Math.round(hp))) } })),

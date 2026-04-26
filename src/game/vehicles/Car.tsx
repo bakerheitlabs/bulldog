@@ -131,6 +131,7 @@ export default function Car({
   const storeColor = useVehicleStore((s) => s.carColors[id]);
   const damage = useVehicleStore((s) => s.carDamage[id] ?? 0);
   const sirenOn = useVehicleStore((s) => !!s.sirenActive[id]);
+  const headlightsManual = useVehicleStore((s) => s.headlightsManual);
   const isDriven = drivenCarId === id;
   const isPolice = variant === 'carPolice';
   const isNight = useIsNight();
@@ -263,7 +264,7 @@ export default function Car({
             </group>
           </Detailed>
         </GltfBoundary>
-        <Headlights enabled={isNight} castBeams={isDriven} />
+        <Headlights enabled={isNight || headlightsManual} castBeams={isDriven} />
       </RigidBody>
       {smokeColor && <CarSmoke getPos={getSmokePos} color={smokeColor} />}
       {isCarDestroyed(damage) && <CarFire getPos={getSmokePos} />}

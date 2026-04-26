@@ -12,10 +12,14 @@ import { useGameStore } from '@/state/gameStore';
 import { readDrivenCarPos, useVehicleStore } from '@/game/vehicles/vehicleState';
 
 const CHUNK_SIZE = 3; // cells per chunk side
-// Chunks around the player to keep mounted. 1 = 3x3 chunk block = 9x9 = 81
-// cells visible. A small radius keeps in-city draw cost down — the off-grid
-// fallback below handles "looking back at the city from a highway."
-const VIEW_RADIUS = 1;
+// Chunks around the player to keep mounted. 2 = 5x5 chunk block = 15x15 = 225
+// cells visible. We need the seam well past the player because chunk swaps go
+// through `startTransition` (see useChunkKey), so the new tree may not commit
+// for many frames under load — and until it does, DistantBuildings keeps
+// drawing the new area as low-LOD boxes. With VIEW_RADIUS=1 the seam was only
+// ~1.5 cells away and players walked into the LOD ring before the transition
+// finished, which read as "stuck in LOD."
+const VIEW_RADIUS = 2;
 
 // Off-grid (airport highway, airport pad) we can't use the chunk grid because
 // the chunk grid only covers the city. Fall back to a distance-based window

@@ -117,11 +117,19 @@ export function useCarDriver({ id, rigidRef, paused, variant }: Options) {
         useVehicleStore.getState().toggleSiren(id);
       }
     };
+    const onLights = (e: KeyboardEvent) => {
+      if (e.code !== 'KeyL' || e.repeat) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+      useVehicleStore.getState().toggleHeadlights();
+    };
     window.addEventListener('keydown', onDown);
     window.addEventListener('keyup', onUp);
+    window.addEventListener('keydown', onLights);
     return () => {
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
+      window.removeEventListener('keydown', onLights);
       if (hornTimer != null) window.clearTimeout(hornTimer);
     };
   }, [isDriven, variant, id]);

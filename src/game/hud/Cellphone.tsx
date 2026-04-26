@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useGameStore } from '@/state/gameStore';
 import { tokens } from '@/ui/tokens';
-import { forecast, FORECAST_SLOT_SECONDS } from '@/game/world/weatherForecast';
+import { buildForecast } from '@/game/world/weatherForecast';
 import type { WeatherType } from '@/save/schema';
 
 type AppId = 'map' | 'weather' | 'messages' | 'bank' | 'camera' | 'music';
@@ -211,11 +211,34 @@ function AppHeader({ label, onBack }: { label: string; onBack: () => void }) {
   );
 }
 
+function formatDuration(sec: number): string {
+  const hours = sec / 3600;
+  if (hours < 1) {
+    const m = Math.max(1, Math.round(sec / 60));
+    return `${m}m`;
+  }
+  // Round to whole hours past 1.5h; show one decimal under that for short
+  // tail-ends ("0.5h remaining" reads better than "30m" right next to "Now").
+  if (hours < 1.5) return `${hours.toFixed(1)}h`;
+  return `${Math.round(hours)}h`;
+}
+
 function WeatherAppBody({ worldSeconds }: { worldSeconds: number }) {
-  const slots = forecast(worldSeconds, 6);
-  const current = slots[0];
-  const upcoming = slots.slice(1);
+  const schedule = useGameStore((s) => s.weatherSchedule);
+  const entries = buildForecast(
+    worldSeconds,
+    schedule.current,
+    schedule.elapsedSec,
+    schedule.upcoming,
+    6,
+  );
+  const current = entries[0];
+  const upcoming = entries.slice(1);
   const meta = WEATHER_META[current.type];
+  const remainingLabel =
+    current.remainingSec != null && current.remainingSec > 0
+      ? `Now · ${formatDuration(current.remainingSec)} left · ends ${formatHour(current.endSeconds)}`
+      : `Now · ends ${formatHour(current.endSeconds)}`;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
       <div
@@ -239,7 +262,7 @@ function WeatherAppBody({ worldSeconds }: { worldSeconds: number }) {
                 marginTop: 2,
               }}
             >
-              Now · until {formatHour(current.startSeconds + FORECAST_SLOT_SECONDS)}
+              {remainingLabel}
             </span>
           </div>
         </div>
@@ -265,11 +288,11 @@ function WeatherAppBody({ worldSeconds }: { worldSeconds: number }) {
         Forecast
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {upcoming.map((slot) => {
-          const m = WEATHER_META[slot.type];
+        {upcoming.map((entry) => {
+          const m = WEATHER_META[entry.type];
           return (
             <div
-              key={slot.slotIndex}
+              key={entry.index}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -287,10 +310,21 @@ function WeatherAppBody({ worldSeconds }: { worldSeconds: number }) {
                   color: 'rgba(255,255,255,0.75)',
                 }}
               >
-                {formatHour(slot.startSeconds)}
+                {formatHour(entry.startSeconds)}
               </span>
               <span style={{ fontSize: 18, lineHeight: 1 }}>{m.glyph}</span>
-              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)' }}>{m.label}</span>
+              <span style={{ flex: 1, fontSize: 11, color: 'rgba(255,255,255,0.85)' }}>
+                {m.label}
+              </span>
+              <span
+                style={{
+                  fontFamily: tokens.font.mono,
+                  fontSize: 10,
+                  color: 'rgba(255,255,255,0.55)',
+                }}
+              >
+                {formatDuration(entry.durationSec)}
+              </span>
             </div>
           );
         })}

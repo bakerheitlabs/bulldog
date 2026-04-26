@@ -27,8 +27,7 @@ import {
   readDrivenPlanePos,
   useVehicleStore,
 } from './vehicles/vehicleState';
-import { useGameStore } from '@/state/gameStore';
-import { useWeatherScheduler } from './world/weatherForecast';
+import { useGameStore, WORLD_TIME_RATE } from '@/state/gameStore';
 
 function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () => void }) {
   const playerRef = useRef<RapierRigidBody | null>(null);
@@ -88,11 +87,11 @@ export default function Game({
 }) {
   usePointerLook(!paused && !mouseFree);
   useInteractionKey(!paused);
-  useWeatherScheduler();
 
   const tickPlaytime = useGameStore((s) => s.tickPlaytime);
   const tickWanted = useGameStore((s) => s.tickWanted);
   const tickWorldTime = useGameStore((s) => s.tickWorldTime);
+  const tickWeather = useGameStore((s) => s.tickWeather);
   const lastTickRef = useRef(performance.now());
   useEffect(() => {
     if (paused) {
@@ -107,11 +106,12 @@ export default function Game({
       tickPlaytime(dt);
       tickWanted(dt);
       tickWorldTime(dt);
+      tickWeather((dt / 1000) * WORLD_TIME_RATE);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [paused, tickPlaytime, tickWanted, tickWorldTime]);
+  }, [paused, tickPlaytime, tickWanted, tickWorldTime, tickWeather]);
 
   useEffect(() => {
     if ((paused || mouseFree) && document.pointerLockElement) {
