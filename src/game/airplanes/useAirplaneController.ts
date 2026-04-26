@@ -85,6 +85,22 @@ export function useAirplaneController({ id, rigidRef, paused, initialYaw }: Opti
     };
   }, [isFlying, rigidRef]);
 
+  // G toggles landing gear, but only while airborne — on the runway the gear
+  // is the only thing keeping the plane off its belly, so the toggle is a
+  // no-op there. Touchdown handling (forced redeploy) lives in useFrame.
+  useEffect(() => {
+    if (!isFlying) return;
+    const onDown = (e: KeyboardEvent) => {
+      if (e.code !== 'KeyG' || e.repeat) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+      if (!stateRef.current.airborne) return;
+      useVehicleStore.getState().toggleLandingGear();
+    };
+    window.addEventListener('keydown', onDown);
+    return () => window.removeEventListener('keydown', onDown);
+  }, [isFlying]);
+
   useFrame((_, dt) => {
     if (!isFlying) return;
     const r = rigidRef.current;
@@ -124,7 +140,14 @@ export function useAirplaneController({ id, rigidRef, paused, initialYaw }: Opti
       brake: k['Space'] ? 1 : 0,
     };
 
+    const wasAirborne = s.airborne;
     advancePlane(s, controls, dt);
+    // Auto-deploy gear on touchdown so the plane never lands on its belly
+    // (and a parked plane left after exit always shows wheels). Player can
+    // still retract again next time they go airborne.
+    if (wasAirborne && !s.airborne) {
+      useVehicleStore.getState().setLandingGearOut(true);
+    }
 
     // Push to rapier kinematic body. Note the negated pitch: in three.js'
     // right-handed Euler convention, a positive X rotation tilts a +Z-forward

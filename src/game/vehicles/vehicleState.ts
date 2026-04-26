@@ -23,6 +23,11 @@ type VehicleState = {
   // it's night OR this flag is set, so L lets the player switch them on in
   // daylight without disabling the night auto-on behavior.
   headlightsManual: boolean;
+  // Landing gear deployed for the player-driven plane. G toggles while
+  // airborne; touchdown forces back to true so a parked plane always shows
+  // its wheels. Ambient/scheduled planes don't read this — their gear stays
+  // out unconditionally.
+  landingGearOut: boolean;
   lastEnteredBanner: EnteredBanner | null;
   enterCar: (id: string) => void;
   exitCar: () => void;
@@ -34,6 +39,8 @@ type VehicleState = {
   toggleSiren: (id: string) => void;
   setSiren: (id: string, on: boolean) => void;
   toggleHeadlights: () => void;
+  toggleLandingGear: () => void;
+  setLandingGearOut: (out: boolean) => void;
   showVehicleEntered: (brand: string, model: string) => void;
 };
 
@@ -44,6 +51,7 @@ export const useVehicleStore = create<VehicleState>((set) => ({
   carDamage: {},
   sirenActive: {},
   headlightsManual: false,
+  landingGearOut: true,
   lastEnteredBanner: null,
   enterCar: (id) => set({ drivenCarId: id, drivenPlaneId: null }),
   exitCar: () => set({ drivenCarId: null }),
@@ -75,6 +83,9 @@ export const useVehicleStore = create<VehicleState>((set) => ({
       return { sirenActive: { ...s.sirenActive, [id]: on } };
     }),
   toggleHeadlights: () => set((s) => ({ headlightsManual: !s.headlightsManual })),
+  toggleLandingGear: () => set((s) => ({ landingGearOut: !s.landingGearOut })),
+  setLandingGearOut: (out) =>
+    set((s) => (s.landingGearOut === out ? {} : { landingGearOut: out })),
   showVehicleEntered: (brand, model) =>
     set({ lastEnteredBanner: { brand, model, at: Date.now() } }),
 }));

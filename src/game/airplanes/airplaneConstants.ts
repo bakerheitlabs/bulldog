@@ -35,7 +35,12 @@ export const PITCH_RECOVER = 0.6;
 export const ROLL_RECOVER = 1.2;
 
 // Ground constraints. y of the plane's body when sitting on the runway.
-export const GROUND_Y = 1.4;
+// The airplane GLB is shifted by `useFitLength`'s yOffset so its lowest visual
+// point (landing-gear bottom) lands at body-frame y=0 — so a body at world
+// y=0 puts the wheels flush with the runway. The collider in DrivableAirplane
+// is positioned to match (bottom at body-frame y=0); changing this value also
+// requires re-checking that collider offset.
+export const GROUND_Y = 0;
 // Vertical speed below which a touchdown is "soft" and we just snap to ground.
 export const SOFT_LAND_VSPEED = 18;
 

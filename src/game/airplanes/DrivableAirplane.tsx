@@ -2,6 +2,7 @@ import { CuboidCollider, RigidBody, type RapierRigidBody } from '@react-three/ra
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import GltfBoundary from '@/game/world/GltfBoundary';
+import { useVehicleStore } from '@/game/vehicles/vehicleState';
 import AirplaneModel from './AirplaneModel';
 import { GROUND_Y } from './airplaneConstants';
 import { registerAirplane } from './airplaneRegistry';
@@ -31,6 +32,13 @@ function PrimitiveAirplane() {
 export default function DrivableAirplane({ id, initialPos, initialYaw, paused }: Props) {
   const rigidRef = useRef<RapierRigidBody | null>(null);
   const tmpPos = useRef(new THREE.Vector3());
+  // Per-plane gear state: only the player-flown plane reads the toggle.
+  // Parked / not-driven planes always show their gear out, so a parked plane
+  // doesn't suddenly hide its wheels when the player retracts gear in a
+  // different plane.
+  const drivenPlaneId = useVehicleStore((s) => s.drivenPlaneId);
+  const landingGearOut = useVehicleStore((s) => s.landingGearOut);
+  const gearOut = drivenPlaneId === id ? landingGearOut : true;
 
   useEffect(() => {
     return registerAirplane({
@@ -65,8 +73,12 @@ export default function DrivableAirplane({ id, initialPos, initialYaw, paused }:
   // Half-extents for a single boxy collider that wraps the fuselage. Coarse
   // — wings clip through buildings — but enough to keep cars from driving
   // through the body when parked, mirroring the v1 ParkedPlane collider.
+  // Position y = half-extent y so the collider's bottom is at body-frame y=0,
+  // matching the visual's bottom (which `useFitLength`'s yOffset places at
+  // body-frame y=0). Without this, a dynamic parked plane settles with its
+  // collider bottom on the ground but its visual floating above it.
   const colliderArgs = useMemo<[number, number, number]>(() => [3, 3, 16], []);
-  const colliderPos = useMemo<[number, number, number]>(() => [0, 1, 0], []);
+  const colliderPos = useMemo<[number, number, number]>(() => [0, 3, 0], []);
 
   return (
     <RigidBody
@@ -86,7 +98,7 @@ export default function DrivableAirplane({ id, initialPos, initialYaw, paused }:
     >
       <CuboidCollider args={colliderArgs} position={colliderPos} />
       <GltfBoundary fallback={<PrimitiveAirplane />}>
-        <AirplaneModel />
+        <AirplaneModel gearOut={gearOut} />
       </GltfBoundary>
     </RigidBody>
   );
