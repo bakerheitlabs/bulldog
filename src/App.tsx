@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import SplashRoute from './routes/SplashRoute';
 import MenuRoute from './routes/MenuRoute';
 import SettingsRoute from './routes/SettingsRoute';
@@ -6,7 +6,7 @@ import GameRoute from './routes/GameRoute';
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/" element={<SplashRoute />} />
         <Route path="/menu" element={<MenuRoute />} />
@@ -14,6 +14,6 @@ export default function App() {
         <Route path="/game" element={<GameRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
