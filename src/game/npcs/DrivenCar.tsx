@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { RapierRigidBody } from '@react-three/rapier';
-import { LANE_WAYPOINTS, yawForLaneDir } from '@/game/world/cityLayout';
+import { yawForLaneDir } from '@/game/world/cityLayout';
+import { LANE_WAYPOINTS } from '@/game/world/worldWaypoints';
 import { pickCarVariantBySeed, VEHICLE_IDENTITY } from '@/game/world/cityAssets';
 import Car from '@/game/vehicles/Car';
 import EjectedDriver from '@/game/vehicles/EjectedDriver';

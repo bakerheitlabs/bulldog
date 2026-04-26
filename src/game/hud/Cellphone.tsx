@@ -41,6 +41,14 @@ function formatHour(seconds: number): string {
 
 const screenBg = 'linear-gradient(180deg, #1f2a44 0%, #2a1e3d 50%, #3a1f2f 100%)';
 
+const phoneScrollCss = `
+.phone-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.22) transparent; }
+.phone-scroll::-webkit-scrollbar { width: 4px; }
+.phone-scroll::-webkit-scrollbar-track { background: transparent; }
+.phone-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); border-radius: 2px; }
+.phone-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
+`;
+
 function formatTime(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds)) % 86400;
   const h24 = Math.floor(total / 3600);
@@ -140,8 +148,7 @@ function HomeScreen({
 }) {
   return (
     <>
-      <StatusBar time={time} />
-      <div style={{ textAlign: 'center', marginTop: 6 }}>
+      <div style={{ textAlign: 'center' }}>
         <div
           style={{
             fontSize: 32,
@@ -170,7 +177,7 @@ function HomeScreen({
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',
           gap: 10,
-          marginTop: 8,
+          marginTop: 12,
         }}
       >
         {APPS.map((app) => (
@@ -335,18 +342,15 @@ function WeatherAppBody({ worldSeconds }: { worldSeconds: number }) {
 
 function AppScreen({
   app,
-  time,
   worldSeconds,
   onBack,
 }: {
   app: (typeof APPS)[number];
-  time: string;
   worldSeconds: number;
   onBack: () => void;
 }) {
   return (
     <>
-      <StatusBar time={time} />
       <AppHeader label={app.label} onBack={onBack} />
       {app.id === 'weather' ? (
         <WeatherAppBody worldSeconds={worldSeconds} />
@@ -425,6 +429,11 @@ export default function Cellphone({
 
   return (
     <div style={wrapperStyle}>
+      {/* Webkit/Chromium scrollbar styling — Firefox honors `scrollbar-*`
+          props inline, but Webkit needs a CSS rule. The phone is the only
+          place we want this thin translucent style, so the rule is scoped
+          via the .phone-scroll class. */}
+      <style>{phoneScrollCss}</style>
       <div
         style={{
           width: 220,
@@ -462,21 +471,40 @@ export default function Cellphone({
             boxSizing: 'border-box',
             display: 'flex',
             flexDirection: 'column',
-            gap: 12,
+            gap: 8,
             overflow: 'hidden',
           }}
         >
-          {app ? (
-            <AppScreen
-              app={app}
-              time={time}
-              worldSeconds={worldSeconds}
-              onBack={() => setActiveApp(null)}
-            />
-          ) : (
-            <HomeScreen time={time} money={money} onOpenApp={setActiveApp} />
-          )}
-          <div style={{ flex: 1 }} />
+          <StatusBar time={time} />
+          {/* Scrollable body — apps with content longer than the screen
+              (weather forecast, eventually messages, etc.) get a vertical
+              scroll inside the screen frame rather than overflowing the
+              phone. Padding-right reserves a small gutter for the thumb so
+              content doesn't shift width when the scrollbar appears. */}
+          <div
+            className="phone-scroll"
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              paddingRight: 4,
+              marginRight: -4,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            {app ? (
+              <AppScreen
+                app={app}
+                worldSeconds={worldSeconds}
+                onBack={() => setActiveApp(null)}
+              />
+            ) : (
+              <HomeScreen time={time} money={money} onOpenApp={setActiveApp} />
+            )}
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -490,6 +518,7 @@ export default function Cellphone({
               border: 'none',
               padding: 0,
               cursor: 'pointer',
+              flexShrink: 0,
             }}
           />
         </div>

@@ -1,55 +1,116 @@
-// Shared island geometry. Builds an organic, rounded island around the union
-// of (city + suburbs + airport) and exposes the resulting THREE.Shape pair
-// (grass + beach) plus a hull point cloud for the physics collider.
+// Shared landmass geometry. Builds one or more organic islands from a list of
+// LandmassSpecs and exposes per-island THREE.Shape pairs (grass + beach) plus
+// hull point clouds for physics colliders.
 //
-// The perimeter is a rounded rectangle (4 straight sides + quarter-arc
-// corners) with seeded radial noise added along the outward normal so the
-// shoreline reads as a coastline rather than a stamped silhouette.
+// Each landmass is a rounded rectangle (4 straight sides + per-corner radii)
+// with seeded radial noise + optional Gaussian "bay" carves added along the
+// outward normal so the shoreline reads as a coastline rather than a stamped
+// silhouette. The first entry is the main island (city + east suburb + the
+// main airport); additional entries come from external island modules
+// (e.g. island2.ts) that contribute their own LandmassSpec.
 
 import * as THREE from 'three';
 import { CITY_DEPTH, CITY_MIN_X, CITY_MIN_Z, CITY_WIDTH } from './cityLayout';
-import { getSplineRegionBounds } from './splineRegions';
+import { getSuburbBounds } from './suburbs';
+import { getMainAirportPadBounds } from './airport';
+import { ISLAND2_LANDMASS } from './island2';
 
 export const BEACH_WIDTH = 36;
-const ISLAND_SAMPLES = 160; // smoothness of the perimeter polygon
-const CORNER_RADIUS = 160;  // quarter-arc radius at each rectangle corner
-const NOISE_AMP = 26;       // peak ± wobble (m) along the outward normal
-const NOISE_SEED = 7;
+const ISLAND_SAMPLES = 192; // smoothness of the perimeter polygon
 
 export type LandBounds = { minX: number; maxX: number; minZ: number; maxZ: number };
 
-function getInnerRect(): LandBounds {
-  const r = getSplineRegionBounds();
-  return {
-    minX: Math.min(CITY_MIN_X, r.minX),
-    maxX: Math.max(CITY_MIN_X + CITY_WIDTH, r.maxX),
-    minZ: Math.min(CITY_MIN_Z, r.minZ),
-    maxZ: Math.max(CITY_MIN_Z + CITY_DEPTH, r.maxZ),
-  };
+// One inward-pulling carve along the perimeter. `tCenter` is the parameter
+// position around the polygon (0..1), `tWidth` is the half-width of the bell
+// curve in the same parameter space, and `depth` is the meters of inward pull
+// at the bell's peak. Multiple bays compose by summing their pulls.
+export type BayCarve = {
+  tCenter: number;
+  tWidth: number;
+  depth: number;
+};
+
+// Per-octave amplitude. Octave i contributes a sine wave at a unique
+// frequency with seeded phase. Amplitudes typically taper down across octaves
+// so the low-frequency terms shape the silhouette and the high-frequency
+// terms add crinkle without dominating.
+export type NoiseProfile = {
+  seed: number;
+  amplitudes: number[]; // meters; index 0 is the lowest frequency
+};
+
+export type LandmassSpec = {
+  id: string;
+  // Inner content rectangle that the perimeter must enclose with margin.
+  innerRect: LandBounds;
+  // Quarter-arc radius at each corner. Order: [topRight, bottomRight, bottomLeft, topLeft].
+  // Asymmetric radii break the perfect-rectangle silhouette.
+  cornerRadii: [number, number, number, number];
+  noise: NoiseProfile;
+  bays?: BayCarve[];
+};
+
+// Sin-octave noise on t ∈ [0,1). Each octave's phase is offset by the seed so
+// different islands read differently. Wraps cleanly on t=1 because every
+// octave's frequency is an integer multiple of 2π.
+function octaveNoise(t: number, profile: NoiseProfile): number {
+  const w = t * Math.PI * 2;
+  let sum = 0;
+  // Frequencies chosen to be coprime-ish so the octaves don't beat into a
+  // visible repeat: 3, 5, 7, 11, 13...
+  const freqs = [3, 5, 7, 11, 13, 17];
+  for (let i = 0; i < profile.amplitudes.length; i++) {
+    const f = freqs[i] ?? freqs[freqs.length - 1] + i;
+    const phase = profile.seed * (1.3 + i * 0.97);
+    sum += Math.sin(w * f + phase) * profile.amplitudes[i];
+  }
+  return sum;
 }
 
-// Periodic noise on t ∈ [0,1). Three sin harmonics with seeded phase offsets
-// give a smooth wobble that wraps cleanly without a visible seam.
-function perimeterNoise(t: number, seed: number): number {
-  const w = t * Math.PI * 2;
-  return (
-    Math.sin(w * 2 + seed * 1.3) * 0.55 +
-    Math.sin(w * 5 + seed * 2.7) * 0.30 +
-    Math.sin(w * 11 + seed * 4.9) * 0.15
-  );
+// Sum of bell-curve inward pulls. `t` is the perimeter parameter; the result
+// is meters to subtract from the radial offset (i.e. pull the coast inward).
+// Wrapping is handled by considering the carve at t and at t±1 so a bay near
+// t=0 still affects t=0.99 samples.
+function bayPull(t: number, bays: BayCarve[] | undefined): number {
+  if (!bays || bays.length === 0) return 0;
+  let pull = 0;
+  for (const bay of bays) {
+    for (const dt of [-1, 0, 1]) {
+      const u = (t - bay.tCenter + dt) / Math.max(0.0001, bay.tWidth);
+      pull += bay.depth * Math.exp(-u * u);
+    }
+  }
+  return pull;
 }
 
 type PerimeterSample = { x: number; z: number; nx: number; nz: number };
 
 // Walk a rounded rectangle by arc length, sampling N points with their
 // outward normals. Order goes CCW from above (top side L→R, then TR arc,
-// right side, BR arc, bottom L←R, BL arc, left side, TL arc).
-function buildPerimeter(rect: LandBounds, R: number, samples: number): PerimeterSample[] {
-  const { minX, maxX, minZ, maxZ } = rect;
-  const sideX = maxX - minX - 2 * R; // top + bottom straight length
-  const sideZ = maxZ - minZ - 2 * R; // left + right straight length
-  const arcLen = (Math.PI / 2) * R;
-  const total = 2 * sideX + 2 * sideZ + 4 * arcLen;
+// right side, BR arc, bottom L←R, BL arc, left side, TL arc). Per-corner
+// radii are ordered [TR, BR, BL, TL] to match the traversal.
+function buildPerimeter(spec: LandmassSpec, samples: number): PerimeterSample[] {
+  const { minX, maxX, minZ, maxZ } = spec.innerRect;
+  const [rTR, rBR, rBL, rTL] = spec.cornerRadii;
+  // Straight side lengths: each side is bounded by the radii of the two
+  // corners it connects, so different corners on the same side shorten the
+  // straight differently than a uniform-radius rounded rect would.
+  const topLen = maxX - minX - (rTL + rTR);
+  const rightLen = maxZ - minZ - (rTR + rBR);
+  const botLen = maxX - minX - (rBL + rBR);
+  const leftLen = maxZ - minZ - (rTL + rBL);
+  const arc = (r: number) => (Math.PI / 2) * r;
+  const lens = [
+    topLen,
+    arc(rTR),
+    rightLen,
+    arc(rBR),
+    botLen,
+    arc(rBL),
+    leftLen,
+    arc(rTL),
+  ];
+  const total = lens.reduce((a, b) => a + b, 0);
 
   const out: PerimeterSample[] = [];
   for (let i = 0; i < samples; i++) {
@@ -58,54 +119,75 @@ function buildPerimeter(rect: LandBounds, R: number, samples: number): Perimeter
     let z = 0;
     let nx = 0;
     let nz = 0;
-    if (d < sideX) {
-      const u = d / sideX;
-      x = minX + R + u * sideX;
-      z = maxZ;
-      nz = 1;
-    } else if ((d -= sideX) < arcLen) {
-      const ang = Math.PI / 2 - (d / arcLen) * (Math.PI / 2); // π/2 → 0
-      x = maxX - R + R * Math.cos(ang);
-      z = maxZ - R + R * Math.sin(ang);
-      nx = Math.cos(ang);
-      nz = Math.sin(ang);
-    } else if ((d -= arcLen) < sideZ) {
-      const u = d / sideZ;
-      x = maxX;
-      z = maxZ - R - u * sideZ;
-      nx = 1;
-    } else if ((d -= sideZ) < arcLen) {
-      const ang = -(d / arcLen) * (Math.PI / 2); // 0 → -π/2
-      x = maxX - R + R * Math.cos(ang);
-      z = minZ + R + R * Math.sin(ang);
-      nx = Math.cos(ang);
-      nz = Math.sin(ang);
-    } else if ((d -= arcLen) < sideX) {
-      const u = d / sideX;
-      x = maxX - R - u * sideX;
-      z = minZ;
-      nz = -1;
-    } else if ((d -= sideX) < arcLen) {
-      const ang = -Math.PI / 2 - (d / arcLen) * (Math.PI / 2); // -π/2 → -π
-      x = minX + R + R * Math.cos(ang);
-      z = minZ + R + R * Math.sin(ang);
-      nx = Math.cos(ang);
-      nz = Math.sin(ang);
-    } else if ((d -= arcLen) < sideZ) {
-      const u = d / sideZ;
-      x = minX;
-      z = minZ + R + u * sideZ;
-      nx = -1;
-    } else {
-      d -= sideZ;
-      const ang = Math.PI - (d / arcLen) * (Math.PI / 2); // π → π/2
-      x = minX + R + R * Math.cos(ang);
-      z = maxZ - R + R * Math.sin(ang);
-      nx = Math.cos(ang);
-      nz = Math.sin(ang);
+    let leg = 0;
+    while (leg < lens.length && d >= lens[leg]) {
+      d -= lens[leg];
+      leg++;
+    }
+    switch (leg) {
+      case 0: {
+        const u = topLen > 0 ? d / topLen : 0;
+        x = minX + rTL + u * topLen;
+        z = maxZ;
+        nz = 1;
+        break;
+      }
+      case 1: {
+        const ang = Math.PI / 2 - (d / Math.max(0.0001, arc(rTR))) * (Math.PI / 2);
+        x = maxX - rTR + rTR * Math.cos(ang);
+        z = maxZ - rTR + rTR * Math.sin(ang);
+        nx = Math.cos(ang);
+        nz = Math.sin(ang);
+        break;
+      }
+      case 2: {
+        const u = rightLen > 0 ? d / rightLen : 0;
+        x = maxX;
+        z = maxZ - rTR - u * rightLen;
+        nx = 1;
+        break;
+      }
+      case 3: {
+        const ang = -(d / Math.max(0.0001, arc(rBR))) * (Math.PI / 2);
+        x = maxX - rBR + rBR * Math.cos(ang);
+        z = minZ + rBR + rBR * Math.sin(ang);
+        nx = Math.cos(ang);
+        nz = Math.sin(ang);
+        break;
+      }
+      case 4: {
+        const u = botLen > 0 ? d / botLen : 0;
+        x = maxX - rBR - u * botLen;
+        z = minZ;
+        nz = -1;
+        break;
+      }
+      case 5: {
+        const ang = -Math.PI / 2 - (d / Math.max(0.0001, arc(rBL))) * (Math.PI / 2);
+        x = minX + rBL + rBL * Math.cos(ang);
+        z = minZ + rBL + rBL * Math.sin(ang);
+        nx = Math.cos(ang);
+        nz = Math.sin(ang);
+        break;
+      }
+      case 6: {
+        const u = leftLen > 0 ? d / leftLen : 0;
+        x = minX;
+        z = minZ + rBL + u * leftLen;
+        nx = -1;
+        break;
+      }
+      default: {
+        const ang = Math.PI - (d / Math.max(0.0001, arc(rTL))) * (Math.PI / 2);
+        x = minX + rTL + rTL * Math.cos(ang);
+        z = maxZ - rTL + rTL * Math.sin(ang);
+        nx = Math.cos(ang);
+        nz = Math.sin(ang);
+        break;
+      }
     }
     const t = i / samples;
-    const offset = perimeterNoise(t, NOISE_SEED) * NOISE_AMP;
+    const offset = octaveNoise(t, spec.noise) - bayPull(t, spec.bays);
     out.push({ x: x + nx * offset, z: z + nz * offset, nx, nz });
   }
   return out;
@@ -129,25 +211,33 @@ function shapeFromSamples(samples: PerimeterSample[], offset: number): THREE.Sha
   return shape;
 }
 
-type IslandData = {
+// World-space (x, z) point on a perimeter polygon.
+export type PerimeterPoint = { x: number; z: number };
+
+export type IslandData = {
+  id: string;
   innerShape: THREE.Shape;
   outerShape: THREE.Shape;
+  // Closed perimeter polygons in world coords. innerPolygon is the grass edge;
+  // outerPolygon is the beach edge (BEACH_WIDTH outside). Used by the minimap
+  // to draw the island silhouettes without re-deriving them from THREE.Shape.
+  innerPolygon: PerimeterPoint[];
+  outerPolygon: PerimeterPoint[];
   // Convex-hull point cloud for the physics collider: top + bottom rings of
   // outer-perimeter points so the hull is a 3D solid with thickness.
   hullPoints: Float32Array;
   bounds: LandBounds; // AABB of outer perimeter
 };
 
-let _cached: IslandData | null = null;
-
-export function getIslandData(): IslandData {
-  if (_cached) return _cached;
-  const samples = buildPerimeter(getInnerRect(), CORNER_RADIUS, ISLAND_SAMPLES);
+function buildIslandData(spec: LandmassSpec): IslandData {
+  const samples = buildPerimeter(spec, ISLAND_SAMPLES);
   const innerShape = shapeFromSamples(samples, 0);
   const outerShape = shapeFromSamples(samples, BEACH_WIDTH);
 
   const HULL_DEPTH = 1; // 1m of collider thickness — keeps fast vehicles from tunneling
   const hull = new Float32Array(samples.length * 6);
+  const innerPolygon: PerimeterPoint[] = new Array(samples.length);
+  const outerPolygon: PerimeterPoint[] = new Array(samples.length);
   let minX = Infinity;
   let maxX = -Infinity;
   let minZ = Infinity;
@@ -156,6 +246,8 @@ export function getIslandData(): IslandData {
     const s = samples[i];
     const x = s.x + s.nx * BEACH_WIDTH;
     const z = s.z + s.nz * BEACH_WIDTH;
+    innerPolygon[i] = { x: s.x, z: s.z };
+    outerPolygon[i] = { x, z };
     hull[i * 6 + 0] = x;
     hull[i * 6 + 1] = 0;
     hull[i * 6 + 2] = z;
@@ -167,21 +259,46 @@ export function getIslandData(): IslandData {
     if (z < minZ) minZ = z;
     if (z > maxZ) maxZ = z;
   }
-  _cached = {
+  return {
+    id: spec.id,
     innerShape,
     outerShape,
+    innerPolygon,
+    outerPolygon,
     hullPoints: hull,
     bounds: { minX, maxX, minZ, maxZ },
   };
+}
+
+// Spec for the main island: encloses the city grid, the east suburb, and the
+// main airport. Other islands (e.g. island 2) own their own airports inside
+// their own landmass spec.
+function getMainIslandSpec(): LandmassSpec {
+  const suburbBounds = getSuburbBounds();
+  const aptBounds = getMainAirportPadBounds();
+  const innerRect: LandBounds = {
+    minX: Math.min(CITY_MIN_X, suburbBounds.minX, aptBounds.minX),
+    maxX: Math.max(CITY_MIN_X + CITY_WIDTH, suburbBounds.maxX, aptBounds.maxX),
+    minZ: Math.min(CITY_MIN_Z, suburbBounds.minZ, aptBounds.minZ),
+    maxZ: Math.max(CITY_MIN_Z + CITY_DEPTH, suburbBounds.maxZ, aptBounds.maxZ),
+  };
+  return {
+    id: 'main',
+    innerRect,
+    // Slightly varied corner radii so the silhouette no longer reads as a
+    // uniform stamp. The previous single-radius shape (160m everywhere)
+    // looked too regular up close.
+    cornerRadii: [180, 140, 170, 150],
+    // Three octaves matched to the previous look (sum of amplitudes ≈ 30m,
+    // close to the original ±26m wobble).
+    noise: { seed: 7, amplitudes: [16, 9, 5] },
+  };
+}
+
+let _cached: IslandData[] | null = null;
+
+export function getAllIslands(): IslandData[] {
+  if (_cached) return _cached;
+  _cached = [getMainIslandSpec(), ISLAND2_LANDMASS].map(buildIslandData);
   return _cached;
-}
-
-// AABB of the beach perimeter — for distant-LOD systems that want a
-// conservative rectangle rather than the curved polygon.
-export function getLandBounds(): LandBounds {
-  return getIslandData().bounds;
-}
-
-export function getInnerLandBounds(): LandBounds {
-  return getInnerRect();
 }

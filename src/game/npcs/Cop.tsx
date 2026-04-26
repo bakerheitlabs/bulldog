@@ -2,11 +2,11 @@ import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
-  PED_WAYPOINTS,
   buildingInteriorAt,
   lineOfSightClear,
   type Waypoint,
 } from '@/game/world/cityLayout';
+import { PED_WAYPOINTS } from '@/game/world/worldWaypoints';
 import { registerNpc } from './npcRegistry';
 import CharacterModel, { type CharacterAction } from '@/game/characters/CharacterModel';
 import GltfBoundary from '@/game/world/GltfBoundary';

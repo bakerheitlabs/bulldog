@@ -4,6 +4,7 @@ import DistantBuildings from './DistantBuildings';
 import DistantRoads from './DistantRoads';
 import GroundAndProps from './GroundAndProps';
 import Island from './Island';
+import Island2Village from './Island2Village';
 import Roads from './Roads';
 import Sidewalks from './Sidewalks';
 import SuburbRoads from './SuburbRoads';
@@ -22,6 +23,7 @@ export default function City({ paused }: { paused: boolean }) {
       <DistantRoads />
       <TrafficLights />
       <AirportRegion paused={paused} />
+      <Island2Village />
     </group>
   );
 }

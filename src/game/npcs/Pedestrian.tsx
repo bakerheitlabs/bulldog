@@ -1,7 +1,8 @@
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { PED_WAYPOINTS, type Waypoint } from '@/game/world/cityLayout';
+import type { Waypoint } from '@/game/world/cityLayout';
+import { PED_WAYPOINTS } from '@/game/world/worldWaypoints';
 import { pickPedestrianVariantBySeed } from '@/game/world/cityAssets';
 import { registerNpc } from './npcRegistry';
 import CharacterModel from '@/game/characters/CharacterModel';
@@ -19,9 +20,18 @@ function randomWaypointId(): string {
   return ids[Math.floor(Math.random() * ids.length)];
 }
 
-export default function Pedestrian({ seed }: { seed: number }) {
+export default function Pedestrian({
+  seed,
+  startId: startIdProp,
+}: {
+  seed: number;
+  // Optional explicit spawn waypoint. When omitted (most peds), defaults to a
+  // random waypoint from PED_WAYPOINTS — fine for the 1000s of city ped WPs
+  // but gives ~0 island 2 coverage, so the spawner overrides with island IDs.
+  startId?: string;
+}) {
   const id = useMemo(() => `ped_${seed}_${Math.random().toString(36).slice(2, 7)}`, [seed]);
-  const startId = useMemo(() => randomWaypointId(), []);
+  const startId = useMemo(() => startIdProp ?? randomWaypointId(), [startIdProp]);
   const start = PED_WAYPOINTS[startId];
   const groupRef = useRef<THREE.Group>(null);
   const [hp, setHp] = useState(MAX_HP);

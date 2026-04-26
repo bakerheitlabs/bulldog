@@ -1,7 +1,13 @@
 import { CuboidCollider, RigidBody } from '@react-three/rapier';
 import DrivableAirplane from '@/game/airplanes/DrivableAirplane';
 import ScheduledFlight from '@/game/airplanes/ScheduledFlight';
-import { AIRPORT } from './airport';
+import type {
+  AirportSpec,
+  HangarSpec,
+  TerminalSpec,
+  TowerSpec,
+} from './airport';
+import { AIRPORTS } from './splineRegions';
 
 const PAD_COLOR = '#3f4147';
 const APRON_COLOR = '#4a4d54';
@@ -44,54 +50,98 @@ function FlatRect({
   );
 }
 
-function RunwayMarkings() {
-  const { centerX, centerZ, depth } = AIRPORT.runway;
-  // Dashed centerline along the runway's long axis (Z).
+// For axis='z' airports, the runway's long axis is Z (so `depth` is the long
+// extent). For axis='x', the long axis is X (so `width` is long). The
+// markings functions use this to lay out centerline dashes and threshold
+// stripes along the correct axis.
+function RunwayMarkings({ spec }: { spec: AirportSpec }) {
+  const { centerX, centerZ, width, depth } = spec.runway;
+  const long = spec.axis === 'z' ? depth : width;
   const dashLen = 12;
   const gap = 12;
-  const halfDepth = depth / 2 - 30; // leave room for thresholds at each end
+  const halfLong = long / 2 - 30; // leave room for thresholds at each end
   const dashes: React.ReactNode[] = [];
-  for (let z = -halfDepth; z <= halfDepth; z += dashLen + gap) {
-    dashes.push(
-      <FlatRect
-        key={`rwc_${z}`}
-        x={centerX}
-        z={centerZ + z}
-        width={1.2}
-        depth={dashLen}
-        y={PAINT_Y}
-        color={RUNWAY_PAINT}
-      />,
-    );
+  for (let s = -halfLong; s <= halfLong; s += dashLen + gap) {
+    if (spec.axis === 'z') {
+      dashes.push(
+        <FlatRect
+          key={`rwc_${s}`}
+          x={centerX}
+          z={centerZ + s}
+          width={1.2}
+          depth={dashLen}
+          y={PAINT_Y}
+          color={RUNWAY_PAINT}
+        />,
+      );
+    } else {
+      dashes.push(
+        <FlatRect
+          key={`rwc_${s}`}
+          x={centerX + s}
+          z={centerZ}
+          width={dashLen}
+          depth={1.2}
+          y={PAINT_Y}
+          color={RUNWAY_PAINT}
+        />,
+      );
+    }
   }
-  // Threshold blocks at each runway end (8 stripes side by side).
+  // Threshold blocks at each runway end (8 stripes side by side, perpendicular
+  // to the runway long axis).
   const threshold: React.ReactNode[] = [];
   const thrW = 2.5;
   const thrLen = 18;
   for (let i = -3; i <= 3; i++) {
-    const x = centerX + i * (thrW + 1.2);
-    threshold.push(
-      <FlatRect
-        key={`thrN_${i}`}
-        x={x}
-        z={centerZ - depth / 2 + thrLen / 2 + 4}
-        width={thrW}
-        depth={thrLen}
-        y={PAINT_Y}
-        color={RUNWAY_PAINT}
-      />,
-    );
-    threshold.push(
-      <FlatRect
-        key={`thrS_${i}`}
-        x={x}
-        z={centerZ + depth / 2 - thrLen / 2 - 4}
-        width={thrW}
-        depth={thrLen}
-        y={PAINT_Y}
-        color={RUNWAY_PAINT}
-      />,
-    );
+    const off = i * (thrW + 1.2);
+    if (spec.axis === 'z') {
+      threshold.push(
+        <FlatRect
+          key={`thrA_${i}`}
+          x={centerX + off}
+          z={centerZ - depth / 2 + thrLen / 2 + 4}
+          width={thrW}
+          depth={thrLen}
+          y={PAINT_Y}
+          color={RUNWAY_PAINT}
+        />,
+      );
+      threshold.push(
+        <FlatRect
+          key={`thrB_${i}`}
+          x={centerX + off}
+          z={centerZ + depth / 2 - thrLen / 2 - 4}
+          width={thrW}
+          depth={thrLen}
+          y={PAINT_Y}
+          color={RUNWAY_PAINT}
+        />,
+      );
+    } else {
+      threshold.push(
+        <FlatRect
+          key={`thrA_${i}`}
+          x={centerX - width / 2 + thrLen / 2 + 4}
+          z={centerZ + off}
+          width={thrLen}
+          depth={thrW}
+          y={PAINT_Y}
+          color={RUNWAY_PAINT}
+        />,
+      );
+      threshold.push(
+        <FlatRect
+          key={`thrB_${i}`}
+          x={centerX + width / 2 - thrLen / 2 - 4}
+          z={centerZ + off}
+          width={thrLen}
+          depth={thrW}
+          y={PAINT_Y}
+          color={RUNWAY_PAINT}
+        />,
+      );
+    }
   }
   return (
     <group>
@@ -101,24 +151,36 @@ function RunwayMarkings() {
   );
 }
 
-function TaxiwayMarkings() {
-  const { centerX, centerZ, depth } = AIRPORT.taxiway;
-  // Continuous yellow centerline (one long thin strip).
+function TaxiwayMarkings({ spec }: { spec: AirportSpec }) {
+  const { centerX, centerZ, width, depth } = spec.taxiway;
+  if (spec.axis === 'z') {
+    return (
+      <FlatRect
+        x={centerX}
+        z={centerZ}
+        width={0.3}
+        depth={depth - 8}
+        y={PAINT_Y}
+        color={TAXI_PAINT}
+      />
+    );
+  }
   return (
     <FlatRect
       x={centerX}
       z={centerZ}
-      width={0.3}
-      depth={depth - 8}
+      width={width - 8}
+      depth={0.3}
       y={PAINT_Y}
       color={TAXI_PAINT}
     />
   );
 }
 
-function Terminal() {
-  const { centerX, centerZ, width, depth, height, color } = AIRPORT.terminal;
+function Terminal({ spec }: { spec: TerminalSpec }) {
+  const { centerX, centerZ, width, depth, height, color } = spec;
   const halfH = height / 2;
+  const trim = 4;
   return (
     <RigidBody type="fixed" colliders={false}>
       <CuboidCollider args={[width / 2, halfH, depth / 2]} position={[centerX, halfH, centerZ]} />
@@ -128,11 +190,11 @@ function Terminal() {
       </mesh>
       {/* Window strip along the long sides — single dark band at mid height. */}
       <mesh position={[centerX + width / 2 + 0.01, halfH, centerZ]} castShadow>
-        <boxGeometry args={[0.05, 3, depth - 4]} />
+        <boxGeometry args={[0.05, Math.min(3, height - 2), Math.max(1, depth - trim)]} />
         <meshStandardMaterial color="#1d2530" />
       </mesh>
       <mesh position={[centerX - width / 2 - 0.01, halfH, centerZ]} castShadow>
-        <boxGeometry args={[0.05, 3, depth - 4]} />
+        <boxGeometry args={[0.05, Math.min(3, height - 2), Math.max(1, depth - trim)]} />
         <meshStandardMaterial color="#1d2530" />
       </mesh>
       {/* Roof line accent. */}
@@ -144,9 +206,9 @@ function Terminal() {
   );
 }
 
-function ControlTower() {
+function ControlTower({ spec }: { spec: TowerSpec }) {
   const { centerX, centerZ, width, depth, shaftHeight, cabinHeight, cabinWidth, color, cabinColor } =
-    AIRPORT.tower;
+    spec;
   const shaftHalf = shaftHeight / 2;
   const cabinY = shaftHeight + cabinHeight / 2;
   return (
@@ -178,20 +240,33 @@ function ControlTower() {
   );
 }
 
-function Hangar({
-  centerX,
-  centerZ,
-  width,
-  depth,
-  height,
-}: {
-  centerX: number;
-  centerZ: number;
-  width: number;
-  depth: number;
-  height: number;
-}) {
+function Hangar({ spec }: { spec: HangarSpec }) {
+  const { centerX, centerZ, width, depth, height, doorFacing = '-x' } = spec;
   const halfH = height / 2;
+  // Position the door panel just outside the hangar on the chosen face.
+  let doorX = centerX;
+  let doorZ = centerZ;
+  let doorW = 0.1;
+  let doorD = depth - 4;
+  let doorH = height * 0.85;
+  if (doorFacing === '-x') {
+    doorX = centerX - width / 2 - 0.05;
+    doorD = depth - 4;
+    doorW = 0.1;
+  } else if (doorFacing === '+x') {
+    doorX = centerX + width / 2 + 0.05;
+    doorD = depth - 4;
+    doorW = 0.1;
+  } else if (doorFacing === '-z') {
+    doorZ = centerZ - depth / 2 - 0.05;
+    doorW = width - 4;
+    doorD = 0.1;
+  } else {
+    // +z
+    doorZ = centerZ + depth / 2 + 0.05;
+    doorW = width - 4;
+    doorD = 0.1;
+  }
   return (
     <RigidBody type="fixed" colliders={false}>
       <CuboidCollider args={[width / 2, halfH, depth / 2]} position={[centerX, halfH, centerZ]} />
@@ -200,12 +275,9 @@ function Hangar({
         <boxGeometry args={[width, height, depth]} />
         <meshStandardMaterial color={HANGAR_BODY} />
       </mesh>
-      {/* Hangar door panel facing the apron (west side, -x). */}
-      <mesh
-        position={[centerX - width / 2 - 0.05, halfH * 0.85, centerZ]}
-        castShadow
-      >
-        <boxGeometry args={[0.1, height * 0.85, depth - 4]} />
+      {/* Hangar door panel facing the apron. */}
+      <mesh position={[doorX, halfH * 0.85, doorZ]} castShadow>
+        <boxGeometry args={[doorW, doorH, doorD]} />
         <meshStandardMaterial color={HANGAR_DOOR} />
       </mesh>
       {/* Roof ridge */}
@@ -217,72 +289,74 @@ function Hangar({
   );
 }
 
-
-export default function AirportRegion({ paused }: { paused: boolean }) {
-  const padCx = (AIRPORT.pad.minX + AIRPORT.pad.maxX) / 2;
-  const padCz = (AIRPORT.pad.minZ + AIRPORT.pad.maxZ) / 2;
-  const padW = AIRPORT.pad.maxX - AIRPORT.pad.minX;
-  const padD = AIRPORT.pad.maxZ - AIRPORT.pad.minZ;
+function Airport({ spec, paused }: { spec: AirportSpec; paused: boolean }) {
+  const padCx = (spec.pad.minX + spec.pad.maxX) / 2;
+  const padCz = (spec.pad.minZ + spec.pad.maxZ) / 2;
+  const padW = spec.pad.maxX - spec.pad.minX;
+  const padD = spec.pad.maxZ - spec.pad.minZ;
 
   return (
     <group>
-      {/* Base pad — flat developed land underneath everything else. Acts as
-          the "ground" for the whole airport so it doesn't read as grass. */}
       <FlatRect x={padCx} z={padCz} width={padW} depth={padD} y={PAD_Y} color={PAD_COLOR} />
-
-      {/* Apron, taxiway, runway in increasing west position. */}
       <FlatRect
-        x={AIRPORT.apron.centerX}
-        z={AIRPORT.apron.centerZ}
-        width={AIRPORT.apron.width}
-        depth={AIRPORT.apron.depth}
+        x={spec.apron.centerX}
+        z={spec.apron.centerZ}
+        width={spec.apron.width}
+        depth={spec.apron.depth}
         y={APRON_Y}
         color={APRON_COLOR}
       />
       <FlatRect
-        x={AIRPORT.taxiway.centerX}
-        z={AIRPORT.taxiway.centerZ}
-        width={AIRPORT.taxiway.width}
-        depth={AIRPORT.taxiway.depth}
+        x={spec.taxiway.centerX}
+        z={spec.taxiway.centerZ}
+        width={spec.taxiway.width}
+        depth={spec.taxiway.depth}
         y={TAXIWAY_Y}
         color={TAXIWAY_COLOR}
       />
       <FlatRect
-        x={AIRPORT.runway.centerX}
-        z={AIRPORT.runway.centerZ}
-        width={AIRPORT.runway.width}
-        depth={AIRPORT.runway.depth}
+        x={spec.runway.centerX}
+        z={spec.runway.centerZ}
+        width={spec.runway.width}
+        depth={spec.runway.depth}
         y={RUNWAY_Y}
         color={RUNWAY_COLOR}
       />
-      <RunwayMarkings />
-      <TaxiwayMarkings />
-
-      {/* Terminal-front parking lot — adjacent to highway terminus. */}
+      <RunwayMarkings spec={spec} />
+      <TaxiwayMarkings spec={spec} />
       <FlatRect
-        x={AIRPORT.parkingLot.centerX}
-        z={AIRPORT.parkingLot.centerZ}
-        width={AIRPORT.parkingLot.width}
-        depth={AIRPORT.parkingLot.depth}
+        x={spec.parkingLot.centerX}
+        z={spec.parkingLot.centerZ}
+        width={spec.parkingLot.width}
+        depth={spec.parkingLot.depth}
         y={PARKING_Y}
         color={PARKING_COLOR}
       />
-
-      <Terminal />
-      <ControlTower />
-      {AIRPORT.hangars.map((h, i) => (
-        <Hangar key={`hangar_${i}`} {...h} />
+      <Terminal spec={spec.terminal} />
+      <ControlTower spec={spec.tower} />
+      {spec.hangars.map((h, i) => (
+        <Hangar key={`${spec.id}_hangar_${i}`} spec={h} />
       ))}
-      {AIRPORT.planes.map((p, i) => (
+      {spec.planes.map((p, i) => (
         <DrivableAirplane
-          key={`plane_${i}`}
-          id={`airport_plane_${i}`}
+          key={`${spec.id}_plane_${i}`}
+          id={`${spec.id}_plane_${i}`}
           initialPos={[p.x, 0, p.z]}
           initialYaw={p.headingY}
           paused={paused}
         />
       ))}
-      <ScheduledFlight paused={paused} />
+      {spec.hostsScheduledFlight && <ScheduledFlight paused={paused} />}
+    </group>
+  );
+}
+
+export default function AirportRegion({ paused }: { paused: boolean }) {
+  return (
+    <group>
+      {AIRPORTS.map((spec) => (
+        <Airport key={spec.id} spec={spec} paused={paused} />
+      ))}
     </group>
   );
 }

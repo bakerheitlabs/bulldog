@@ -4,10 +4,11 @@
 // noise, and Player.tsx already runs every frame anyway.
 
 import { findCellByTag, getPlayerSpawn, type Vec3 } from './cityLayout';
-import { AIRPORT } from './airport';
+import { AIRPORTS } from './splineRegions';
 
 export const TELEPORT_DESTINATIONS = [
   'airport',
+  'island2',
   'hospital',
   'gunstore',
   'gun_store',
@@ -28,9 +29,14 @@ export function isTeleportDestination(s: string): s is TeleportDestination {
 export function resolveDestination(name: TeleportDestination): Vec3 | null {
   if (name === 'spawn') return getPlayerSpawn();
   if (name === 'airport') {
-    // Drop the player on the terminal-front parking lot, just east of the
-    // terminal building so they land on asphalt rather than inside it.
-    const lot = AIRPORT.parkingLot;
+    // Drop the player on the main airport's terminal-front parking lot, just
+    // east of the terminal so they land on asphalt rather than inside it.
+    const lot = AIRPORTS[0].parkingLot;
+    return [lot.centerX, 1, lot.centerZ];
+  }
+  if (name === 'island2') {
+    // Drop the player on island 2's airport parking lot.
+    const lot = AIRPORTS[1].parkingLot;
     return [lot.centerX, 1, lot.centerZ];
   }
   // Tagged grid landmarks: re-use the same "stand on the east-face sidewalk"

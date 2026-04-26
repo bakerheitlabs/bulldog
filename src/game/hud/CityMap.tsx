@@ -1,24 +1,22 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
   type PointerEvent,
-  type WheelEvent,
 } from 'react';
 import {
   allCells,
   cellBounds,
-  CITY_DEPTH,
   CITY_MIN_X,
   CITY_MIN_Z,
-  CITY_WIDTH,
   SIDEWALK_WIDTH,
 } from '@/game/world/cityLayout';
 import { sampleSpline } from '@/game/world/suburbs';
-import { SPLINE_REGIONS, getSplineRegionBounds } from '@/game/world/splineRegions';
-import { AIRPORT } from '@/game/world/airport';
+import { AIRPORTS, SPLINE_REGIONS } from '@/game/world/splineRegions';
+import { getAllIslands, type PerimeterPoint } from '@/game/world/landBounds';
 import { useGameStore } from '@/state/gameStore';
 import {
   readDrivenCarPos,
@@ -37,26 +35,69 @@ type MapView = {
 };
 
 const CELLS = allCells();
-const CITY_HEIGHT = CITY_DEPTH;
+const ISLANDS = getAllIslands();
 const MAP_PADDING = 10;
+// Extra water around the islands so the coast doesn't sit on the viewport edge.
+const WATER_MARGIN = 80;
 const MINIMAP_VIEW_MIN = 150;
 const MINIMAP_VIEW_MAX = 310;
-// Widen the map extent to enclose the grid plus any off-grid spline regions
-// (suburbs + airport). The grid still starts at (0,0) in map coords so cell
-// drawing keeps its offsets; WORLD_* simply extends the viewport.
-const REGION_BOUNDS = getSplineRegionBounds();
-const WORLD_MIN_X = Math.min(0, REGION_BOUNDS.minX - CITY_MIN_X);
-const WORLD_MIN_Y = Math.min(0, REGION_BOUNDS.minZ - CITY_MIN_Z);
-const WORLD_MAX_X = Math.max(CITY_WIDTH, REGION_BOUNDS.maxX - CITY_MIN_X);
-const WORLD_MAX_Y = Math.max(CITY_HEIGHT, REGION_BOUNDS.maxZ - CITY_MIN_Z);
+// Bound the viewport to the union of all island AABBs (in map coords). The
+// islands are sized to enclose the city grid, suburbs, and airports, so this
+// covers everything visible. Coords are pre-translated by CITY_MIN so map
+// space stays anchored at the grid's top-left like before.
+const ISLAND_BOUNDS = (() => {
+  let minX = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxZ = -Infinity;
+  for (const island of ISLANDS) {
+    if (island.bounds.minX < minX) minX = island.bounds.minX;
+    if (island.bounds.minZ < minZ) minZ = island.bounds.minZ;
+    if (island.bounds.maxX > maxX) maxX = island.bounds.maxX;
+    if (island.bounds.maxZ > maxZ) maxZ = island.bounds.maxZ;
+  }
+  return { minX, minZ, maxX, maxZ };
+})();
+const WORLD_MIN_X = ISLAND_BOUNDS.minX - CITY_MIN_X - WATER_MARGIN;
+const WORLD_MIN_Y = ISLAND_BOUNDS.minZ - CITY_MIN_Z - WATER_MARGIN;
+const WORLD_MAX_X = ISLAND_BOUNDS.maxX - CITY_MIN_X + WATER_MARGIN;
+const WORLD_MAX_Y = ISLAND_BOUNDS.maxZ - CITY_MIN_Z + WATER_MARGIN;
 const WORLD_WIDTH = WORLD_MAX_X - WORLD_MIN_X;
 const WORLD_HEIGHT = WORLD_MAX_Y - WORLD_MIN_Y;
-const FULL_VIEW_SIZE = Math.max(WORLD_WIDTH, WORLD_HEIGHT) + MAP_PADDING * 2;
+// Pause view is non-square so a tall world (island 2 sits well north of the
+// main island) fills the viewport instead of forcing the user to zoom out
+// past empty water on the sides. `MapView.size` is the viewBox *height* in
+// map units; width follows the world's aspect ratio. Picking height is
+// arbitrary — the math is symmetric and pan/zoom scale both axes uniformly.
+const FULL_VIEW_W = WORLD_WIDTH + MAP_PADDING * 2;
+const FULL_VIEW_H = WORLD_HEIGHT + MAP_PADDING * 2;
+const VIEW_ASPECT_W_OVER_H = FULL_VIEW_W / FULL_VIEW_H;
+const FULL_VIEW_SIZE = FULL_VIEW_H;
 const PAUSE_MIN_VIEW_SIZE = 90;
+const vbWidth = (size: number) => size * VIEW_ASPECT_W_OVER_H;
 const PLAYER_COLOR = '#f5cb5c';
+const WATER_COLOR = '#2a4a6e';
+const BEACH_COLOR = '#d9c89a';
+const GRASS_COLOR = '#3a4a39';
 const SUBURB_ROAD_COLOR = '#2c2f35';
 const SUBURB_ROAD_WIDTH_PX = 6;
 const SUBURB_SAMPLES = 40;
+
+// --- Pan/zoom feel tuning (pause view only) ---
+// Drag inertia: velocity decays exponentially after release with this e-fold
+// time. Lower = snappier stop, higher = more glide.
+const ANIM_VEL_TAU_MS = 220;
+// Smooth zoom: render size lerps toward target size with this e-fold time.
+// Each wheel event nudges the *target*, so consecutive events never feel
+// jittery — they just push the goalpost.
+const ANIM_ZOOM_TAU_MS = 75;
+// Stop the anim loop once both signals are this small.
+const ANIM_VEL_EPS = 0.003; // map units per ms
+const ANIM_ZOOM_EPS = 0.3; // map units of remaining size delta
+// Velocity is computed from samples within this trailing window so a long
+// slow drag that ends still doesn't fling.
+const VELOCITY_WINDOW_MS = 90;
+const VELOCITY_SAMPLE_CAP = 8;
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -72,9 +113,10 @@ function toMapPos(x: number, z: number) {
 
 function boundedView(view: MapView): MapView {
   const size = clamp(view.size, PAUSE_MIN_VIEW_SIZE, FULL_VIEW_SIZE);
+  const w = vbWidth(size);
   return {
     size,
-    x: clamp(view.x, WORLD_MIN_X - MAP_PADDING, WORLD_MAX_X + MAP_PADDING - size),
+    x: clamp(view.x, WORLD_MIN_X - MAP_PADDING, WORLD_MAX_X + MAP_PADDING - w),
     y: clamp(view.y, WORLD_MIN_Y - MAP_PADDING, WORLD_MAX_Y + MAP_PADDING - size),
   };
 }
@@ -197,6 +239,30 @@ function RoadMarkings({
   );
 }
 
+function polygonPoints(points: PerimeterPoint[]): string {
+  let out = '';
+  for (let i = 0; i < points.length; i++) {
+    const p = toMapPos(points[i].x, points[i].z);
+    out += `${p.x},${p.y} `;
+  }
+  return out;
+}
+
+// Beach + grass silhouette for every island. Drawn first (over the water rect)
+// so all later layers — cells, roads, airports — sit on top of land.
+function IslandLayer() {
+  return (
+    <>
+      {ISLANDS.map((island) => (
+        <g key={island.id}>
+          <polygon points={polygonPoints(island.outerPolygon)} fill={BEACH_COLOR} />
+          <polygon points={polygonPoints(island.innerPolygon)} fill={GRASS_COLOR} />
+        </g>
+      ))}
+    </>
+  );
+}
+
 function SuburbLayer() {
   const content = useMemo(() => {
     return SPLINE_REGIONS.flatMap((s) => {
@@ -251,97 +317,116 @@ function AirportLayer({ showLabels }: { showLabels: boolean }) {
       const p = toMapPos(cx - w / 2, cz - d / 2);
       out.push(<rect key={key} x={p.x} y={p.y} width={w} height={d} fill={fill} />);
     };
-    // Pad first (under everything else)
-    {
-      const cx = (AIRPORT.pad.minX + AIRPORT.pad.maxX) / 2;
-      const cz = (AIRPORT.pad.minZ + AIRPORT.pad.maxZ) / 2;
-      const w = AIRPORT.pad.maxX - AIRPORT.pad.minX;
-      const d = AIRPORT.pad.maxZ - AIRPORT.pad.minZ;
-      rect('apt_pad', cx, cz, w, d, '#3f4147');
-    }
-    rect(
-      'apt_apron',
-      AIRPORT.apron.centerX,
-      AIRPORT.apron.centerZ,
-      AIRPORT.apron.width,
-      AIRPORT.apron.depth,
-      '#4a4d54',
-    );
-    rect(
-      'apt_taxi',
-      AIRPORT.taxiway.centerX,
-      AIRPORT.taxiway.centerZ,
-      AIRPORT.taxiway.width,
-      AIRPORT.taxiway.depth,
-      '#26282d',
-    );
-    rect(
-      'apt_runway',
-      AIRPORT.runway.centerX,
-      AIRPORT.runway.centerZ,
-      AIRPORT.runway.width,
-      AIRPORT.runway.depth,
-      '#1f2126',
-    );
-    // Runway centerline (thin yellow stripe).
-    {
-      const p = toMapPos(AIRPORT.runway.centerX, AIRPORT.runway.centerZ - AIRPORT.runway.depth / 2);
-      out.push(
-        <line
-          key="apt_runway_cl"
-          x1={p.x}
-          y1={p.y + 4}
-          x2={p.x}
-          y2={p.y + AIRPORT.runway.depth - 4}
-          stroke="#d8c46a"
-          strokeWidth={1}
-          strokeDasharray="4 4"
-        />,
+    AIRPORTS.forEach((apt, idx) => {
+      const k = (s: string) => `${apt.id}_${s}`;
+      // Pad first (under everything else)
+      {
+        const cx = (apt.pad.minX + apt.pad.maxX) / 2;
+        const cz = (apt.pad.minZ + apt.pad.maxZ) / 2;
+        const w = apt.pad.maxX - apt.pad.minX;
+        const d = apt.pad.maxZ - apt.pad.minZ;
+        rect(k('pad'), cx, cz, w, d, '#3f4147');
+      }
+      rect(
+        k('apron'),
+        apt.apron.centerX,
+        apt.apron.centerZ,
+        apt.apron.width,
+        apt.apron.depth,
+        '#4a4d54',
       );
-    }
-    rect(
-      'apt_lot',
-      AIRPORT.parkingLot.centerX,
-      AIRPORT.parkingLot.centerZ,
-      AIRPORT.parkingLot.width,
-      AIRPORT.parkingLot.depth,
-      '#555861',
-    );
-    rect(
-      'apt_terminal',
-      AIRPORT.terminal.centerX,
-      AIRPORT.terminal.centerZ,
-      AIRPORT.terminal.width,
-      AIRPORT.terminal.depth,
-      '#cfd2d6',
-    );
-    rect(
-      'apt_tower',
-      AIRPORT.tower.centerX,
-      AIRPORT.tower.centerZ,
-      AIRPORT.tower.width,
-      AIRPORT.tower.depth,
-      '#bfc1c5',
-    );
-    AIRPORT.hangars.forEach((h, i) => {
-      rect(`apt_hangar_${i}`, h.centerX, h.centerZ, h.width, h.depth, '#7c8089');
+      rect(
+        k('taxi'),
+        apt.taxiway.centerX,
+        apt.taxiway.centerZ,
+        apt.taxiway.width,
+        apt.taxiway.depth,
+        '#26282d',
+      );
+      rect(
+        k('runway'),
+        apt.runway.centerX,
+        apt.runway.centerZ,
+        apt.runway.width,
+        apt.runway.depth,
+        '#1f2126',
+      );
+      // Runway centerline along the long axis.
+      {
+        if (apt.axis === 'z') {
+          const p = toMapPos(apt.runway.centerX, apt.runway.centerZ - apt.runway.depth / 2);
+          out.push(
+            <line
+              key={k('runway_cl')}
+              x1={p.x}
+              y1={p.y + 4}
+              x2={p.x}
+              y2={p.y + apt.runway.depth - 4}
+              stroke="#d8c46a"
+              strokeWidth={1}
+              strokeDasharray="4 4"
+            />,
+          );
+        } else {
+          const p = toMapPos(apt.runway.centerX - apt.runway.width / 2, apt.runway.centerZ);
+          out.push(
+            <line
+              key={k('runway_cl')}
+              x1={p.x + 4}
+              y1={p.y}
+              x2={p.x + apt.runway.width - 4}
+              y2={p.y}
+              stroke="#d8c46a"
+              strokeWidth={1}
+              strokeDasharray="4 4"
+            />,
+          );
+        }
+      }
+      rect(
+        k('lot'),
+        apt.parkingLot.centerX,
+        apt.parkingLot.centerZ,
+        apt.parkingLot.width,
+        apt.parkingLot.depth,
+        '#555861',
+      );
+      rect(
+        k('terminal'),
+        apt.terminal.centerX,
+        apt.terminal.centerZ,
+        apt.terminal.width,
+        apt.terminal.depth,
+        '#cfd2d6',
+      );
+      rect(
+        k('tower'),
+        apt.tower.centerX,
+        apt.tower.centerZ,
+        apt.tower.width,
+        apt.tower.depth,
+        '#bfc1c5',
+      );
+      apt.hangars.forEach((h, i) => {
+        rect(k(`hangar_${i}`), h.centerX, h.centerZ, h.width, h.depth, '#7c8089');
+      });
+      if (showLabels) {
+        const tp = toMapPos(apt.terminal.centerX, apt.terminal.centerZ);
+        out.push(
+          <text
+            key={k('label')}
+            x={tp.x}
+            y={tp.y + 5}
+            textAnchor="middle"
+            fontSize={16}
+            fontWeight={700}
+            fill="#1d2530"
+          >
+            {idx === 0 ? 'A' : `A${idx + 1}`}
+          </text>,
+        );
+      }
     });
-    if (showLabels) {
-      const tp = toMapPos(AIRPORT.terminal.centerX, AIRPORT.terminal.centerZ);
-      out.push(
-        <text
-          key="apt_label"
-          x={tp.x}
-          y={tp.y + 5}
-          textAnchor="middle"
-          fontSize={16}
-          fontWeight={700}
-          fill="#1d2530"
-        >
-          A
-        </text>,
-      );
-    }
     return out;
   }, [showLabels]);
   return <>{content}</>;
@@ -437,8 +522,134 @@ export default function CityMap({ variant }: CityMapProps) {
     startClientX: number;
     startClientY: number;
     startView: MapView;
+    rectWidth: number;
+    rectHeight: number;
   } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  // Mirror of pauseView so the rAF loop reads/writes synchronously without
+  // racing setState. Always written alongside setPauseView.
+  const viewRef = useRef<MapView>(pauseView);
+  // Velocity samples in client px during a drag — converted to map-space
+  // velocity at release time using the drag's mapPerPixel.
+  const sampleRef = useRef<{ x: number; y: number; t: number }[]>([]);
+  // Animation state: pan velocity (map units / ms) and a zoom target with the
+  // map-space focus point that should stay anchored under the cursor.
+  const animRef = useRef<{
+    raf: number | null;
+    lastT: number;
+    vx: number;
+    vy: number;
+    zoomTargetSize: number | null;
+    zoomFocusX: number;
+    zoomFocusY: number;
+  }>({
+    raf: null,
+    lastT: 0,
+    vx: 0,
+    vy: 0,
+    zoomTargetSize: null,
+    zoomFocusX: 0,
+    zoomFocusY: 0,
+  });
+
+  // One rAF loop per active anim. Reads/writes refs synchronously and only
+  // calls setPauseView when the view actually changes; stops itself when both
+  // pan velocity and zoom-toward-target have settled.
+  const kickAnim = useCallback(() => {
+    const a = animRef.current;
+    if (a.raf != null) return;
+    a.lastT = performance.now();
+    const tick = (now: number) => {
+      const dt = Math.min(50, now - a.lastT);
+      a.lastT = now;
+      let next = viewRef.current;
+      let changed = false;
+
+      // Pan inertia: integrate velocity, decay it, kill on wall contact.
+      const hasVel = Math.abs(a.vx) > ANIM_VEL_EPS || Math.abs(a.vy) > ANIM_VEL_EPS;
+      if (hasVel) {
+        const reqX = next.x + a.vx * dt;
+        const reqY = next.y + a.vy * dt;
+        next = boundedView({ ...next, x: reqX, y: reqY });
+        if (Math.abs(next.x - reqX) > 0.01) a.vx = 0;
+        if (Math.abs(next.y - reqY) > 0.01) a.vy = 0;
+        const decay = Math.exp(-dt / ANIM_VEL_TAU_MS);
+        a.vx *= decay;
+        a.vy *= decay;
+        changed = true;
+      } else {
+        a.vx = 0;
+        a.vy = 0;
+      }
+
+      // Zoom: lerp size toward target, recompute x/y so the focus map-point
+      // stays put under the cursor.
+      if (a.zoomTargetSize != null) {
+        const remaining = a.zoomTargetSize - next.size;
+        if (Math.abs(remaining) <= ANIM_ZOOM_EPS) {
+          const ratio = a.zoomTargetSize / next.size;
+          next = boundedView({
+            size: a.zoomTargetSize,
+            x: a.zoomFocusX - (a.zoomFocusX - next.x) * ratio,
+            y: a.zoomFocusY - (a.zoomFocusY - next.y) * ratio,
+          });
+          a.zoomTargetSize = null;
+        } else {
+          const alpha = 1 - Math.exp(-dt / ANIM_ZOOM_TAU_MS);
+          const newSize = next.size + remaining * alpha;
+          const ratio = newSize / next.size;
+          next = boundedView({
+            size: newSize,
+            x: a.zoomFocusX - (a.zoomFocusX - next.x) * ratio,
+            y: a.zoomFocusY - (a.zoomFocusY - next.y) * ratio,
+          });
+        }
+        changed = true;
+      }
+
+      if (changed) {
+        viewRef.current = next;
+        setPauseView(next);
+      }
+
+      const idle =
+        Math.abs(a.vx) <= ANIM_VEL_EPS &&
+        Math.abs(a.vy) <= ANIM_VEL_EPS &&
+        a.zoomTargetSize == null;
+      if (idle) {
+        a.raf = null;
+        return;
+      }
+      a.raf = requestAnimationFrame(tick);
+    };
+    a.raf = requestAnimationFrame(tick);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      const a = animRef.current;
+      if (a.raf != null) {
+        cancelAnimationFrame(a.raf);
+        a.raf = null;
+      }
+    };
+  }, []);
+
+  const stopAnim = () => {
+    const a = animRef.current;
+    a.vx = 0;
+    a.vy = 0;
+    a.zoomTargetSize = null;
+    if (a.raf != null) {
+      cancelAnimationFrame(a.raf);
+      a.raf = null;
+    }
+  };
+
+  const writeView = (v: MapView) => {
+    viewRef.current = v;
+    setPauseView(v);
+  };
 
   const minimapViewSize = clamp(
     MINIMAP_VIEW_MIN + pose.speedMps * (pose.driven ? 8 : 6),
@@ -448,7 +659,7 @@ export default function CityMap({ variant }: CityMapProps) {
 
   const viewBox = useMemo(() => {
     if (!isMinimap) {
-      return `${pauseView.x} ${pauseView.y} ${pauseView.size} ${pauseView.size}`;
+      return `${pauseView.x} ${pauseView.y} ${vbWidth(pauseView.size)} ${pauseView.size}`;
     }
     const x = clamp(
       player.x - minimapViewSize / 2,
@@ -465,64 +676,126 @@ export default function CityMap({ variant }: CityMapProps) {
 
   const handlePointerDown = (e: PointerEvent<SVGSVGElement>) => {
     if (isMinimap) return;
+    // A new grab kills any in-flight inertia or zoom — feels like grabbing
+    // a moving sheet of paper.
+    stopAnim();
     e.currentTarget.setPointerCapture(e.pointerId);
+    const rect = e.currentTarget.getBoundingClientRect();
     dragRef.current = {
       pointerId: e.pointerId,
       startClientX: e.clientX,
       startClientY: e.clientY,
-      startView: pauseView,
+      startView: viewRef.current,
+      rectWidth: Math.max(1, rect.width),
+      rectHeight: Math.max(1, rect.height),
     };
+    sampleRef.current = [{ x: e.clientX, y: e.clientY, t: performance.now() }];
     setIsDragging(true);
   };
 
   const handlePointerMove = (e: PointerEvent<SVGSVGElement>) => {
     const drag = dragRef.current;
     if (isMinimap || !drag) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const mapPerPixel = drag.startView.size / Math.max(1, rect.width);
-    setPauseView(
+    const mapPerPixelX = vbWidth(drag.startView.size) / drag.rectWidth;
+    const mapPerPixelY = drag.startView.size / drag.rectHeight;
+    writeView(
       boundedView({
         ...drag.startView,
-        x: drag.startView.x - (e.clientX - drag.startClientX) * mapPerPixel,
-        y: drag.startView.y - (e.clientY - drag.startClientY) * mapPerPixel,
+        x: drag.startView.x - (e.clientX - drag.startClientX) * mapPerPixelX,
+        y: drag.startView.y - (e.clientY - drag.startClientY) * mapPerPixelY,
       }),
     );
+    const samples = sampleRef.current;
+    samples.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+    if (samples.length > VELOCITY_SAMPLE_CAP) samples.shift();
   };
 
   const handlePointerUp = (e: PointerEvent<SVGSVGElement>) => {
-    if (dragRef.current?.pointerId === e.pointerId) {
+    const drag = dragRef.current;
+    if (drag?.pointerId === e.pointerId) {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
       }
+      // Compute release velocity from samples within the trailing window so
+      // a long drag that ended slowly doesn't fling.
+      const now = performance.now();
+      const recent = sampleRef.current.filter((s) => now - s.t <= VELOCITY_WINDOW_MS);
+      if (recent.length >= 2) {
+        const first = recent[0];
+        const last = recent[recent.length - 1];
+        const dt = Math.max(1, last.t - first.t);
+        const mapPerPixelX = vbWidth(drag.startView.size) / drag.rectWidth;
+        const mapPerPixelY = drag.startView.size / drag.rectHeight;
+        // Map moves opposite the cursor (the world stays put as the viewport
+        // shifts), so negate the delta to get viewport velocity.
+        animRef.current.vx = (-(last.x - first.x) / dt) * mapPerPixelX;
+        animRef.current.vy = (-(last.y - first.y) / dt) * mapPerPixelY;
+        kickAnim();
+      }
       dragRef.current = null;
+      sampleRef.current = [];
       setIsDragging(false);
     }
   };
 
-  const handleWheel = (e: WheelEvent<SVGSVGElement>) => {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // Wheel + Safari gesture events must be attached as native non-passive
+  // listeners. React's onWheel is passive by default, which makes
+  // preventDefault() a silent no-op — and on macOS a trackpad pinch then
+  // bubbles up as a browser page-zoom. Same story for Safari's gesturestart
+  // family. We attach manually so preventDefault actually blocks the default.
+  useEffect(() => {
     if (isMinimap) return;
-    e.preventDefault();
-    e.stopPropagation();
+    const el = svgRef.current;
+    if (!el) return;
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pointerX = (e.clientX - rect.left) / Math.max(1, rect.width);
-    const pointerY = (e.clientY - rect.top) / Math.max(1, rect.height);
-    const pixelDelta =
-      e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * rect.height : e.deltaY;
-    const zoomFactor = Math.exp(clamp(pixelDelta, -100, 100) * 0.002);
+    const onWheel = (e: globalThis.WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
 
-    setPauseView((prev) => {
-      const focusX = prev.x + pointerX * prev.size;
-      const focusY = prev.y + pointerY * prev.size;
-      const nextSize = clamp(prev.size * zoomFactor, PAUSE_MIN_VIEW_SIZE, FULL_VIEW_SIZE);
-      const ratio = nextSize / prev.size;
-      return boundedView({
-        size: nextSize,
-        x: focusX - (focusX - prev.x) * ratio,
-        y: focusY - (focusY - prev.y) * ratio,
-      });
-    });
-  };
+      const rect = el.getBoundingClientRect();
+      const pointerX = (e.clientX - rect.left) / Math.max(1, rect.width);
+      const pointerY = (e.clientY - rect.top) / Math.max(1, rect.height);
+      const pixelDelta =
+        e.deltaMode === 1
+          ? e.deltaY * 16
+          : e.deltaMode === 2
+            ? e.deltaY * rect.height
+            : e.deltaY;
+      // Trackpad pinch on Chromium delivers wheel events with ctrlKey=true;
+      // boost the multiplier so a pinch feels like a zoom rather than a
+      // page-scale-sized scroll.
+      const sensitivity = e.ctrlKey ? 0.012 : 0.002;
+      const zoomFactor = Math.exp(clamp(pixelDelta, -100, 100) * sensitivity);
+
+      const a = animRef.current;
+      const currentSize = viewRef.current.size;
+      a.zoomFocusX = viewRef.current.x + pointerX * vbWidth(currentSize);
+      a.zoomFocusY = viewRef.current.y + pointerY * currentSize;
+      const baseSize = a.zoomTargetSize ?? currentSize;
+      a.zoomTargetSize = clamp(baseSize * zoomFactor, PAUSE_MIN_VIEW_SIZE, FULL_VIEW_SIZE);
+      kickAnim();
+    };
+
+    // Safari's pinch fires gesture events instead of ctrlKey wheel events.
+    // We don't act on them yet, but we must preventDefault to stop the
+    // browser's page zoom.
+    const onGesture = (e: Event) => {
+      e.preventDefault();
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('gesturestart', onGesture as EventListener, { passive: false });
+    el.addEventListener('gesturechange', onGesture as EventListener, { passive: false });
+    el.addEventListener('gestureend', onGesture as EventListener, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('gesturestart', onGesture as EventListener);
+      el.removeEventListener('gesturechange', onGesture as EventListener);
+      el.removeEventListener('gestureend', onGesture as EventListener);
+    };
+  }, [isMinimap, kickAnim]);
 
   const wrapStyle: CSSProperties = isMinimap
     ? {
@@ -537,8 +810,13 @@ export default function CityMap({ variant }: CityMapProps) {
         WebkitBackdropFilter: 'blur(6px)',
       }
     : {
-        width: '100%',
-        aspectRatio: '1 / 1',
+        // Match the world's aspect ratio so the entire map fills the panel
+        // without empty water on the sides; cap the width derived from the
+        // available viewport height so the map can't overflow the panel
+        // vertically on shorter screens.
+        width: `min(100%, calc((100vh - 220px) * ${VIEW_ASPECT_W_OVER_H}))`,
+        aspectRatio: `${WORLD_WIDTH} / ${WORLD_HEIGHT}`,
+        margin: '0 auto',
         background: '#0f1115',
         border: '1px solid #343840',
         borderRadius: 8,
@@ -552,6 +830,7 @@ export default function CityMap({ variant }: CityMapProps) {
   return (
     <div style={wrapStyle} aria-label={isMinimap ? 'Minimap' : 'City map'}>
       <svg
+        ref={svgRef}
         viewBox={viewBox}
         width="100%"
         height="100%"
@@ -560,7 +839,6 @@ export default function CityMap({ variant }: CityMapProps) {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onWheel={handleWheel}
         style={{ display: 'block', cursor: isMinimap ? 'default' : isDragging ? 'grabbing' : 'grab' }}
       >
         <rect
@@ -568,8 +846,9 @@ export default function CityMap({ variant }: CityMapProps) {
           y={WORLD_MIN_Y - MAP_PADDING}
           width={WORLD_WIDTH + MAP_PADDING * 2}
           height={WORLD_HEIGHT + MAP_PADDING * 2}
-          fill="#293b2d"
+          fill={WATER_COLOR}
         />
+        <IslandLayer />
         <AirportLayer showLabels={!isMinimap} />
         <MapCells showLabels={!isMinimap} />
         <SuburbLayer />

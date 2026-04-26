@@ -3,6 +3,10 @@ import DrivenCar from './DrivenCar';
 import Pedestrian from './Pedestrian';
 import Cop from './Cop';
 import PoliceCruiser from './PoliceCruiser';
+import {
+  ISLAND2_LANE_WAYPOINT_IDS,
+  ISLAND2_PED_WAYPOINT_IDS,
+} from '@/game/world/island2';
 import { starsFromHeat, useGameStore } from '@/state/gameStore';
 
 // Tuned for the 25×25 grid (~3× the area of the original 15×15). Density
@@ -11,6 +15,13 @@ const PED_COUNT = 90;
 const CAR_COUNT = 50;
 const PATROL_COP_COUNT = 12;
 const PATROL_CRUISER_COUNT = 8;
+
+// Dedicated quota for island 2's city district. Random sampling of waypoint
+// graphs would give roughly zero coverage (8 island lane WPs vs. hundreds of
+// city WPs), so the spawner explicitly seeds NPCs there. Modest counts so the
+// small block doesn't read as crowded.
+const ISLAND2_PED_COUNT = 6;
+const ISLAND2_CAR_COUNT = 3;
 
 // Additional response foot-cops spawned near the player per wanted star.
 // At 2+ stars, response cruisers stack on top of the patrol cruisers.
@@ -26,6 +37,24 @@ export default function Spawner({ paused = false }: { paused?: boolean }) {
   );
   const patrolCruisers = useMemo(
     () => Array.from({ length: PATROL_CRUISER_COUNT }, (_, i) => i),
+    [],
+  );
+  const island2Peds = useMemo(
+    () =>
+      Array.from({ length: ISLAND2_PED_COUNT }, (_, i) => ({
+        seed: i,
+        startId:
+          ISLAND2_PED_WAYPOINT_IDS[i % ISLAND2_PED_WAYPOINT_IDS.length],
+      })),
+    [],
+  );
+  const island2Cars = useMemo(
+    () =>
+      Array.from({ length: ISLAND2_CAR_COUNT }, (_, i) => ({
+        seed: i,
+        startId:
+          ISLAND2_LANE_WAYPOINT_IDS[i % ISLAND2_LANE_WAYPOINT_IDS.length],
+      })),
     [],
   );
   const heat = useGameStore((s) => s.wanted.heat);
@@ -46,8 +75,19 @@ export default function Spawner({ paused = false }: { paused?: boolean }) {
       {peds.map((i) => (
         <Pedestrian key={`ped_${i}`} seed={i} />
       ))}
+      {island2Peds.map(({ seed, startId }) => (
+        <Pedestrian key={`i2_ped_${seed}`} seed={seed + 2000} startId={startId} />
+      ))}
       {cars.map((i) => (
         <DrivenCar key={`car_${i}`} seed={i + 100} paused={paused} />
+      ))}
+      {island2Cars.map(({ seed, startId }) => (
+        <DrivenCar
+          key={`i2_car_${seed}`}
+          seed={seed + 2200}
+          startId={startId}
+          paused={paused}
+        />
       ))}
       {patrolCops.map((i) => (
         <Cop key={`patrol_${i}`} seed={i + 400} patrol />

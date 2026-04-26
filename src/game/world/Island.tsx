@@ -1,7 +1,7 @@
 import { ConvexHullCollider, RigidBody } from '@react-three/rapier';
 import { useMemo } from 'react';
 import * as THREE from 'three';
-import { getIslandData } from './landBounds';
+import { getAllIslands } from './landBounds';
 
 const WATER_SIZE = 8000; // covers well past the fog horizon from any vantage
 // Layering: water sits well below land. The grass plane keeps the existing
@@ -16,29 +16,34 @@ const WATER_COLOR = '#2a4a6e';
 const BEACH_COLOR = '#d9c89a';
 const GRASS_COLOR = '#3a4a39';
 
-// Renders the entire island: ocean, sandy beach ring, and the green base
-// land. The convex-hull collider covers the full beach footprint so vehicles
-// can drive onto sand and only fall into water at the actual visible edge.
+// Renders all islands plus the single global ocean plane that fills the gaps
+// between them. Each island gets its own convex-hull collider covering the
+// full beach footprint so vehicles can drive onto sand and only fall into
+// water at the actual visible edge.
 export default function Island() {
-  const { innerShape, outerShape, hullPoints } = useMemo(() => getIslandData(), []);
+  const islands = useMemo(() => getAllIslands(), []);
 
   return (
     <group>
-      <RigidBody type="fixed" colliders={false}>
-        <ConvexHullCollider args={[hullPoints]} />
-      </RigidBody>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, WATER_Y, 0]} receiveShadow>
         <planeGeometry args={[WATER_SIZE, WATER_SIZE]} />
         <meshStandardMaterial color={WATER_COLOR} roughness={0.4} metalness={0.1} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, BEACH_Y, 0]} receiveShadow>
-        <shapeGeometry args={[outerShape]} />
-        <meshStandardMaterial color={BEACH_COLOR} side={THREE.DoubleSide} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, GRASS_Y, 0]} receiveShadow>
-        <shapeGeometry args={[innerShape]} />
-        <meshStandardMaterial color={GRASS_COLOR} side={THREE.DoubleSide} />
-      </mesh>
+      {islands.map((island) => (
+        <group key={island.id}>
+          <RigidBody type="fixed" colliders={false}>
+            <ConvexHullCollider args={[island.hullPoints]} />
+          </RigidBody>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, BEACH_Y, 0]} receiveShadow>
+            <shapeGeometry args={[island.outerShape]} />
+            <meshStandardMaterial color={BEACH_COLOR} side={THREE.DoubleSide} />
+          </mesh>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, GRASS_Y, 0]} receiveShadow>
+            <shapeGeometry args={[island.innerShape]} />
+            <meshStandardMaterial color={GRASS_COLOR} side={THREE.DoubleSide} />
+          </mesh>
+        </group>
+      ))}
     </group>
   );
 }

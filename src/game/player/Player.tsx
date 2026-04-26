@@ -20,9 +20,24 @@ import { useKeyboard } from './useKeyboard';
 import CharacterModel, { type CharacterAction } from '@/game/characters/CharacterModel';
 import GltfBoundary from '@/game/world/GltfBoundary';
 import { PLAYER_VARIANT, WEAPON_MODEL } from '@/game/world/cityAssets';
+import Parachute from './Parachute';
 
 const SPEED = 5;
 const SPRINT = 9;
+// Mid-air bailout deploys a parachute when the plane is at least this many
+// meters above the runway. Below it, exit snaps to ground next to the plane
+// (current behavior — no value in deploying for a 1m hop).
+const PARACHUTE_DEPLOY_ALTITUDE = 3;
+// Vertical descent rate under canopy (m/s, downward). Slow enough that the
+// player has time to steer and read the city below; not so slow that the
+// scene drags.
+const PARACHUTE_DESCENT_SPEED = 4;
+// Max horizontal speed the player can steer to under canopy. Lighter than
+// on-foot SPEED so the canopy reads as the dominant force.
+const PARACHUTE_LATERAL_SPEED = 4;
+// Y at which the parachute auto-disengages — anything below this is "feet
+// near the ground," and we hand control back to normal walking physics.
+const PARACHUTE_LAND_Y = 1.4;
 // Stable references — @react-three/rapier reapplies every mutable RigidBody
 // prop (including `type` AND `position`) when any of them changes by ref.
 // A fresh object/array each render would override the manual setBodyType we
@@ -50,6 +65,14 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
   const [action, setAction] = useState<CharacterAction>('idle');
   const actionRef = useRef<CharacterAction>('idle');
   const mouseDownRef = useRef(false);
+  // Parachute mode: set when the player exits a plane above
+  // PARACHUTE_DEPLOY_ALTITUDE; cleared automatically on touchdown. While
+  // parachuting, vertical velocity is clamped to a slow descent and lateral
+  // velocity is steered by WASD with a reduced cap. Tracked as a ref AND
+  // state so useFrame can read without triggering re-renders, while the
+  // canopy mesh re-renders when the value flips.
+  const parachutingRef = useRef(false);
+  const [parachuting, setParachuting] = useState(false);
 
   useEffect(() => {
     if (paused) return;
@@ -116,12 +139,27 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
         const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
         const ox = planePos.x + side.x * 7;
         const oz = planePos.z + side.z * 7;
-        // Snap player to ground level (y=1.2) regardless of plane altitude.
-        // No mid-air bailout — exiting at altitude lands you under the plane.
-        r.setTranslation({ x: ox, y: 1.2, z: oz }, true);
+        // Mid-air bailout: if the plane is well above the runway, drop the
+        // player at the plane's altitude with parachute deployed. The
+        // useFrame loop takes over from here — clamps Y velocity to a slow
+        // descent and lets WASD steer the canopy until touchdown.
+        if (planePos.y >= PARACHUTE_DEPLOY_ALTITUDE) {
+          // Spawn slightly below the plane so the canopy doesn't immediately
+          // intersect the wing. Initial downward kick gives a natural drop
+          // before the descent clamp engages on the first frame.
+          r.setTranslation({ x: ox, y: planePos.y - 1.5, z: oz }, true);
+          r.setLinvel({ x: 0, y: -PARACHUTE_DESCENT_SPEED, z: 0 }, true);
+          parachutingRef.current = true;
+          setParachuting(true);
+        } else {
+          // On or near the runway: snap to ground level (y=1.2). Standard exit.
+          r.setTranslation({ x: ox, y: 1.2, z: oz }, true);
+          r.setLinvel({ x: 0, y: 0, z: 0 }, true);
+          parachutingRef.current = false;
+          setParachuting(false);
+        }
       }
       r.setBodyType(0, true);
-      r.setLinvel({ x: 0, y: 0, z: 0 }, true);
       wasFlying.current = false;
       clearDrivenPlanePose();
     }
@@ -219,6 +257,37 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
     const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
     const strafe = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
 
+    // Parachute mode: clamp vertical velocity to a slow descent and let WASD
+    // steer at PARACHUTE_LATERAL_SPEED. Exits when the player drops below
+    // PARACHUTE_LAND_Y so normal walking takes over the moment feet touch.
+    if (parachutingRef.current) {
+      const t = rigid.current.translation();
+      if (t.y <= PARACHUTE_LAND_Y) {
+        parachutingRef.current = false;
+        setParachuting(false);
+      } else {
+        const dir = new THREE.Vector3()
+          .addScaledVector(fwd, forward - back)
+          .addScaledVector(strafe, right - left);
+        if (dir.lengthSq() > 0) dir.normalize();
+        rigid.current.setLinvel(
+          {
+            x: dir.x * PARACHUTE_LATERAL_SPEED,
+            y: -PARACHUTE_DESCENT_SPEED,
+            z: dir.z * PARACHUTE_LATERAL_SPEED,
+          },
+          true,
+        );
+        if (meshRef.current) meshRef.current.rotation.y = yaw + Math.PI;
+        setPlayerTransform([t.x, t.y, t.z], yaw);
+        if (actionRef.current !== 'idle') {
+          actionRef.current = 'idle';
+          setAction('idle');
+        }
+        return;
+      }
+    }
+
     const dir = new THREE.Vector3()
       .addScaledVector(fwd, forward - back)
       .addScaledVector(strafe, right - left);
@@ -284,6 +353,7 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
       userData={PLAYER_USER_DATA}
     >
       <CapsuleCollider args={[0.5, 0.4]} />
+      <Parachute visible={parachuting} />
       <group ref={meshRef} visible={!inVehicle}>
         <GltfBoundary
           fallback={

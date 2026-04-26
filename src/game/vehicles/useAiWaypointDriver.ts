@@ -4,13 +4,13 @@ import { useRef, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import {
   LANE_OFFSET,
-  LANE_WAYPOINTS,
   getIntersection,
   stopBackoff,
   yawForLaneDir,
   type LaneDir,
   type LaneWaypoint,
 } from '@/game/world/cityLayout';
+import { LANE_WAYPOINTS } from '@/game/world/worldWaypoints';
 import { mustStopAtLight } from '@/game/world/trafficLightState';
 import { isVehicleAhead } from './vehicleRegistry';
 import { CAR_COLLIDER_HALF } from './drivingConstants';

@@ -328,66 +328,130 @@ export function startRain(initialIntensity = 0.5): RainHandle | null {
   };
 }
 
-// One-shot thunder. Two crackle bursts ride a deep brown-noise rumble whose
-// lowpass cutoff sweeps down so the tail fades into a low rumble. Total
-// duration ~3 s. Routed through the ambient bus.
-export function playThunder() {
+// Linear interpolate. Local helper so the thunder synth doesn't reach into
+// THREE.MathUtils (which would pull three into the audio module).
+function mix(a: number, b: number, t: number): number {
+  return a + (b - a) * Math.max(0, Math.min(1, t));
+}
+
+export type ThunderOpts = {
+  // 0 = directly overhead (sharp crackle, short rumble),
+  // 1 = far horizon (no crackle, long rolling rumble fading off).
+  distance?: number;
+  // Master loudness multiplier on top of distance attenuation. Useful for
+  // making the rare close strike feel disproportionately loud, or muting an
+  // off-screen strike further. Defaults to 1.
+  intensity?: number;
+};
+
+// One-shot thunder. Realism comes from varying every parameter with the
+// reported `distance`: close strikes are short, sharp, and crackle-heavy;
+// distant ones are long brown-noise rolls with no high-frequency snap. We
+// also stack 1–4 separate rumble layers so multi-stroke strikes (very common
+// in real CG lightning) read as a textured roll rather than a single envelope.
+export function playThunder(opts: ThunderOpts = {}) {
   resumeIfSuspended();
   const ctx = getAudioContext();
   const dest = getAmbientNode();
   if (!ctx || !dest) return;
 
-  const t0 = ctx.currentTime;
-  const totalDuration = 3.2;
+  const distance = Math.max(0, Math.min(1, opts.distance ?? Math.random()));
+  const intensity = Math.max(0, Math.min(1.5, opts.intensity ?? 1));
 
+  // Distant claps roll for several seconds; nearby ones snap and decay fast.
+  const totalDuration = mix(2.2, 6.2, distance);
+  // Distance attenuates the highs much more than the lows — air absorbs HF
+  // first. We scale crackles to ~0 at the horizon, and pull the rumble
+  // lowpass down so the tail is mostly sub-bass.
+  const crackleMix = Math.pow(1 - distance, 1.8);
+  const numCrackles = Math.max(1, Math.round(mix(4.0, 0.6, distance)));
+  const rumbleAttackS = mix(0.03, 0.35, distance);
+  const rumbleLpStart = mix(1600, 500, distance);
+  const rumbleLpEnd = mix(80, 35, distance);
+  // Nearby claps are physically louder, but distance falloff is ~1/r — clip
+  // at a floor so far rumbles are still audible during a storm bed.
+  const distanceGain = mix(1.0, 0.32, distance);
+  const masterGain = 0.55 * distanceGain * intensity;
+
+  const t0 = ctx.currentTime;
   const out = ctx.createGain();
-  out.gain.value = 0.55;
+  out.gain.value = masterGain;
   out.connect(dest);
 
-  // Rumble — long brown noise with a downward-sweeping lowpass.
-  const rumble = ctx.createBufferSource();
-  rumble.buffer = brownNoiseBuffer(ctx, totalDuration);
-  const rumbleLp = ctx.createBiquadFilter();
-  rumbleLp.type = 'lowpass';
-  rumbleLp.frequency.setValueAtTime(900, t0);
-  rumbleLp.frequency.exponentialRampToValueAtTime(60, t0 + totalDuration);
-  const rumbleGain = ctx.createGain();
-  rumbleGain.gain.setValueAtTime(0.0001, t0);
-  rumbleGain.gain.exponentialRampToValueAtTime(1.6, t0 + 0.06);
-  rumbleGain.gain.exponentialRampToValueAtTime(0.0001, t0 + totalDuration);
-  rumble.connect(rumbleLp);
-  rumbleLp.connect(rumbleGain);
-  rumbleGain.connect(out);
-  rumble.start(t0);
-  rumble.stop(t0 + totalDuration);
-
-  // Crackles — two short noise bursts at random offsets, bandpassed in the
-  // 1.5–4 kHz region for the snap of close lightning.
-  const crackleAt = (offset: number, gainPeak: number) => {
-    const dur = 0.18;
-    const t = t0 + offset;
-    const src = ctx.createBufferSource();
-    src.buffer = noiseBuffer(ctx, dur);
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.value = 2400 + Math.random() * 800;
-    bp.Q.value = 0.8;
+  // Stack 1–3 brown-noise rumbles with small offsets. Each emulates a
+  // separate stroke or echo, so the envelope feels organic instead of one
+  // monolithic swell. Closer strikes get fewer overlapping rumbles (they
+  // arrive together); far strikes get more, spread further (echo-rich).
+  const rumbleLayers = Math.max(
+    1,
+    Math.round(mix(1.2, 3.2, distance) + (Math.random() - 0.5) * 0.8),
+  );
+  for (let i = 0; i < rumbleLayers; i++) {
+    const layerOffset = i === 0 ? 0 : Math.random() * mix(0.15, 1.4, distance);
+    const layerDur = totalDuration - layerOffset;
+    if (layerDur < 0.4) continue;
+    const layerStart = t0 + layerOffset;
+    const rumble = ctx.createBufferSource();
+    rumble.buffer = brownNoiseBuffer(ctx, layerDur);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    // Slight per-layer detune in the cutoff band so the layers don't
+    // perfectly phase-cancel. Cheap variation that adds richness.
+    const lpJitter = 0.85 + Math.random() * 0.3;
+    lp.frequency.setValueAtTime(rumbleLpStart * lpJitter, layerStart);
+    lp.frequency.exponentialRampToValueAtTime(
+      rumbleLpEnd * lpJitter,
+      layerStart + layerDur,
+    );
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(gainPeak, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(bp);
-    bp.connect(g);
+    const peak = mix(1.7, 0.9, distance) * (i === 0 ? 1 : 0.6 + Math.random() * 0.4);
+    g.gain.setValueAtTime(0.0001, layerStart);
+    g.gain.exponentialRampToValueAtTime(peak, layerStart + rumbleAttackS);
+    // Two-stage decay: a brisk initial drop, then a long tail. Sounds more
+    // like real thunder than a single ramp does — close thunder has the
+    // initial "boom" then dies off; distant thunder rolls.
+    const midT = layerStart + rumbleAttackS + (layerDur - rumbleAttackS) * 0.4;
+    g.gain.exponentialRampToValueAtTime(peak * mix(0.18, 0.5, distance), midT);
+    g.gain.exponentialRampToValueAtTime(0.0001, layerStart + layerDur);
+    rumble.connect(lp);
+    lp.connect(g);
     g.connect(out);
-    src.start(t);
-    src.stop(t + dur);
-  };
-  crackleAt(0, 0.9);
-  crackleAt(0.18 + Math.random() * 0.12, 0.55);
+    rumble.start(layerStart);
+    rumble.stop(layerStart + layerDur);
+  }
+
+  // Crackles — short bandpassed noise bursts representing the high-frequency
+  // snap of nearby return strokes. Skipped entirely for distant claps where
+  // the highs would have been absorbed by the air anyway.
+  if (crackleMix > 0.01) {
+    for (let i = 0; i < numCrackles; i++) {
+      const offset = i === 0 ? 0 : 0.06 + Math.random() * 0.35 * (1 - distance * 0.5);
+      const dur = 0.08 + Math.random() * 0.18;
+      const t = t0 + offset;
+      const src = ctx.createBufferSource();
+      src.buffer = noiseBuffer(ctx, dur);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      // Closer = brighter crackle; distance dulls the band toward the rumble.
+      bp.frequency.value = mix(1500, 3800, 1 - distance) + Math.random() * 600;
+      bp.Q.value = 0.6 + Math.random() * 0.8;
+      const g = ctx.createGain();
+      const cracklePeak = mix(0.35, 1.1, 1 - distance) * (i === 0 ? 1 : 0.45 + Math.random() * 0.4);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(cracklePeak * crackleMix, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(out);
+      src.start(t);
+      src.stop(t + dur);
+    }
+  }
+
   // Disconnect the master gain after the tail to free the node graph.
   window.setTimeout(() => {
     try { out.disconnect(); } catch { /* already gone */ }
-  }, totalDuration * 1000 + 200);
+  }, totalDuration * 1000 + 300);
 }
 
 export type EngineHandle = {
