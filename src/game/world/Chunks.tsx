@@ -1,5 +1,5 @@
 import { useFrame } from '@react-three/fiber';
-import { useMemo, useRef, useState } from 'react';
+import { startTransition, useMemo, useRef, useState } from 'react';
 import {
   allCells,
   cellCenter,
@@ -134,7 +134,13 @@ export function useChunkKey(): ChunkKey {
     const cur = playerChunk();
     if (chunksEqual(cur, lastRef.current)) return;
     lastRef.current = cur;
-    setKey(cur);
+    // Mark the chunk swap as a transition so React can do the heavy
+    // re-render (Buildings, Roads, Sidewalks, GroundAndProps re-keying their
+    // visible cells) off the critical path. The current frame keeps painting
+    // the previous chunk's geometry until the new tree is ready, instead of
+    // stalling 50–200ms mid-drive — the hitch was making the integrator and
+    // camera lerp jump on the recovery frame, which read as jitter at speed.
+    startTransition(() => setKey(cur));
   });
 
   return key;

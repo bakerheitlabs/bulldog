@@ -15,6 +15,7 @@ import { GROUND_Y } from '@/game/airplanes/airplaneConstants';
 import { useSettingsStore } from '@/state/settingsStore';
 import { tokens } from '@/ui/tokens';
 import CityMap from './CityMap';
+import CompassBand from './CompassBand';
 
 const HP_SEGMENTS = 10;
 
@@ -449,7 +450,7 @@ export default function HUD() {
         }}
       />
 
-      {/* top-right: wanted stars (conditional) + health + money */}
+      {/* top-right: wanted stars (conditional) + weapon (on foot) + health + money + clock */}
       <div
         style={{
           position: 'absolute',
@@ -462,6 +463,35 @@ export default function HUD() {
         }}
       >
         {stars > 0 && <WantedStars stars={stars} />}
+        {!drivenCarId && !drivenPlaneId && (
+          equipped && ammo ? (
+            <StatusPanel
+              label={WEAPONS[equipped].name}
+              primary={
+                <>
+                  {ammo.magazine}
+                  <span
+                    style={{
+                      color: tokens.color.textMuted,
+                      fontSize: 16,
+                      fontWeight: 500,
+                      marginLeft: 4,
+                    }}
+                  >
+                    / {ammo.reserve}
+                  </span>
+                </>
+              }
+              secondary={
+                ammo.magazine === 0 ? (
+                  <span style={{ color: tokens.color.hpLow, letterSpacing: 1.4 }}>RELOAD</span>
+                ) : undefined
+              }
+            />
+          ) : (
+            <StatusPanel label="Weapon" primary={<span style={{ fontSize: 18 }}>Unarmed</span>} />
+          )
+        )}
         <HealthPanel hp={player.health} />
         <MoneyReadout money={player.money} />
         <ClockReadout seconds={worldSeconds} weather={weather} />
@@ -472,12 +502,66 @@ export default function HUD() {
         <CityMap variant="minimap" />
       </div>
 
-      {/* bottom-right: weapon/ammo OR speedometer (+ altimeter when flying) */}
-      <div style={{ position: 'absolute', bottom: 18, right: 18 }}>
-        {drivenPlaneId ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+      {/* top-center: heading band when flying */}
+      {drivenPlaneId && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 14,
+            left: '50%',
+            transform: 'translateX(-50%)',
+          }}
+        >
+          <CompassBand />
+        </div>
+      )}
+
+      {/* bottom-right: speedometer (+ altimeter when flying); empty on foot */}
+      {(drivenCarId || drivenPlaneId) && (
+        <div style={{ position: 'absolute', bottom: 18, right: 18 }}>
+          {drivenPlaneId ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+              <StatusPanel
+                label="Airspeed"
+                primary={
+                  <>
+                    {Math.round(speedDisplay)}
+                    <span
+                      style={{
+                        color: tokens.color.textMuted,
+                        fontSize: 13,
+                        marginLeft: 6,
+                        fontWeight: 500,
+                      }}
+                    >
+                      {speedUnitLabel}
+                    </span>
+                  </>
+                }
+                secondary={altitudeM < 1 ? 'GROUND' : 'AIRBORNE'}
+              />
+              <StatusPanel
+                label="Altitude"
+                primary={
+                  <>
+                    {Math.round(altitudeM)}
+                    <span
+                      style={{
+                        color: tokens.color.textMuted,
+                        fontSize: 13,
+                        marginLeft: 6,
+                        fontWeight: 500,
+                      }}
+                    >
+                      m
+                    </span>
+                  </>
+                }
+              />
+            </div>
+          ) : (
             <StatusPanel
-              label="Airspeed"
+              label="Speed"
               primary={
                 <>
                   {Math.round(speedDisplay)}
@@ -493,75 +577,11 @@ export default function HUD() {
                   </span>
                 </>
               }
-              secondary={altitudeM < 1 ? 'GROUND' : 'AIRBORNE'}
+              secondary={speedTier}
             />
-            <StatusPanel
-              label="Altitude"
-              primary={
-                <>
-                  {Math.round(altitudeM)}
-                  <span
-                    style={{
-                      color: tokens.color.textMuted,
-                      fontSize: 13,
-                      marginLeft: 6,
-                      fontWeight: 500,
-                    }}
-                  >
-                    m
-                  </span>
-                </>
-              }
-            />
-          </div>
-        ) : drivenCarId ? (
-          <StatusPanel
-            label="Speed"
-            primary={
-              <>
-                {Math.round(speedDisplay)}
-                <span
-                  style={{
-                    color: tokens.color.textMuted,
-                    fontSize: 13,
-                    marginLeft: 6,
-                    fontWeight: 500,
-                  }}
-                >
-                  {speedUnitLabel}
-                </span>
-              </>
-            }
-            secondary={speedTier}
-          />
-        ) : equipped && ammo ? (
-          <StatusPanel
-            label={WEAPONS[equipped].name}
-            primary={
-              <>
-                {ammo.magazine}
-                <span
-                  style={{
-                    color: tokens.color.textMuted,
-                    fontSize: 16,
-                    fontWeight: 500,
-                    marginLeft: 4,
-                  }}
-                >
-                  / {ammo.reserve}
-                </span>
-              </>
-            }
-            secondary={
-              ammo.magazine === 0 ? (
-                <span style={{ color: tokens.color.hpLow, letterSpacing: 1.4 }}>RELOAD</span>
-              ) : undefined
-            }
-          />
-        ) : (
-          <StatusPanel label="Weapon" primary={<span style={{ fontSize: 18 }}>Unarmed</span>} />
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* center prompt */}
       {prompt && (

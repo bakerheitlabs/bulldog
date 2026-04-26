@@ -28,6 +28,7 @@ import {
   useVehicleStore,
 } from './vehicles/vehicleState';
 import { useGameStore } from '@/state/gameStore';
+import { useWeatherScheduler } from './world/weatherForecast';
 
 function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () => void }) {
   const playerRef = useRef<RapierRigidBody | null>(null);
@@ -78,13 +79,16 @@ function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () 
 
 export default function Game({
   paused,
+  mouseFree,
   onOpenShop,
 }: {
   paused: boolean;
+  mouseFree?: boolean;
   onOpenShop: () => void;
 }) {
-  usePointerLook(!paused);
+  usePointerLook(!paused && !mouseFree);
   useInteractionKey(!paused);
+  useWeatherScheduler();
 
   const tickPlaytime = useGameStore((s) => s.tickPlaytime);
   const tickWanted = useGameStore((s) => s.tickWanted);
@@ -110,10 +114,10 @@ export default function Game({
   }, [paused, tickPlaytime, tickWanted, tickWorldTime]);
 
   useEffect(() => {
-    if (paused && document.pointerLockElement) {
+    if ((paused || mouseFree) && document.pointerLockElement) {
       document.exitPointerLock();
     }
-  }, [paused]);
+  }, [paused, mouseFree]);
 
   useEffect(
     () => () => {

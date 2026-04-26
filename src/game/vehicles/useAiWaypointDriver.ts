@@ -13,6 +13,7 @@ import {
 } from '@/game/world/cityLayout';
 import { mustStopAtLight } from '@/game/world/trafficLightState';
 import { isVehicleAhead } from './vehicleRegistry';
+import { CAR_COLLIDER_HALF } from './drivingConstants';
 
 // Kinematic path-follower AI. Each car becomes a `KinematicPositionBased`
 // body, advances along a planned Bezier-curve segment between consecutive
@@ -25,6 +26,14 @@ import { isVehicleAhead } from './vehicleRegistry';
 // is enforced via the existing `isVehicleAhead` forward-cone check.
 
 const BODY_KINEMATIC_POSITION = 2;
+
+// The Y at which a car's body center sits when its collider bottom is flush
+// with the y=0 island ground. Hardcoded instead of read from r.translation()
+// at AI takeover: the car spawns Dynamic at CAR_SPAWN_Y and the AI hook
+// captures whatever Y gravity has reached on the first useFrame, which is
+// race-dependent across refreshes — that's the "different heights every
+// reload, sometimes only roofs / sometimes wheels clipping" symptom.
+const CAR_GROUND_Y = CAR_COLLIDER_HALF[1];
 
 // ~1.5 car lengths ahead.
 const FOLLOW_DIST = 6;
@@ -268,7 +277,7 @@ export function useAiWaypointDriver({
       s.toWpId = next.id;
       s.segment = buildSegment(startWp, next);
       s.progress = 0;
-      s.groundY = r.translation().y;
+      s.groundY = CAR_GROUND_Y;
       s.initialized = true;
       const sp = sampleSegment(s.segment, 0, sampleRef.current);
       r.setNextKinematicTranslation({ x: sp.x, y: s.groundY, z: sp.z });

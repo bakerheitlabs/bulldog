@@ -393,6 +393,10 @@ export function playThunder() {
 export type EngineHandle = {
   setThrottle: (t: number) => void;
   setSpeed: (s: number) => void;
+  // Optional 3D position update — only present when the engine was started
+  // with spatial routing. Lets callers track a moving sound source so the
+  // listener hears it pan + fade with distance.
+  setPosition?: (x: number, y: number, z: number) => void;
   stop: () => void;
 };
 
@@ -414,7 +418,7 @@ export type EngineProfile = {
 };
 
 export const DEFAULT_ENGINE: EngineProfile = {
-  bassFreq: 50,
+  bassFreq: 38,
   rpmRange: 0.9,
   masterIdle: 0.07,
   masterPeak: 0.10,
@@ -428,50 +432,83 @@ export const DEFAULT_ENGINE: EngineProfile = {
   lfoDepth: 0.22,
 };
 
+// Lazily build a tanh soft-clip curve. Reused across all engine instances so
+// we're not allocating a 2k-sample Float32Array per car. Tanh gives a smooth
+// asymptotic clip — pushing harder into it produces more harmonics rather
+// than a hard fold, which is what makes it sound like an overdriven amp /
+// real exhaust note instead of a mathematical wave.
+let _saturationCurve: Float32Array | null = null;
+function saturationCurve(): Float32Array {
+  if (_saturationCurve) return _saturationCurve;
+  const n = 2048;
+  const k = 2.5; // shape factor — higher = more aggressive clipping
+  const curve = new Float32Array(n);
+  const norm = Math.tanh(k);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = Math.tanh(x * k) / norm;
+  }
+  _saturationCurve = curve;
+  return _saturationCurve;
+}
+
 export function startEngine(profile: EngineProfile = DEFAULT_ENGINE): EngineHandle | null {
   resumeIfSuspended();
   const ctx = getAudioContext();
   const dest = getSfxNode();
   if (!ctx || !dest) return null;
 
-  // Layered model:
-  //   bass   — sawtooth at profile.bassFreq, the deep block-rumble
-  //   mid    — square at 2× bass, gives the engine its body
-  //   high   — sawtooth at 4× bass, intake/whine that comes in under throttle
-  //   noise  — band-passed brown noise, mechanical roar that scales with throttle
-  //   lfo    — tremolo on the master gain at firing-rhythm rate, scales with RPM
-  //   lp     — resonant low-pass that opens up under throttle (throttle plate)
+  // Layered model — intentionally avoids buzzy waveforms (saw/square) that
+  // make synth engines sound electronic. Tone is built from triangles, then
+  // pushed through a soft-clip waveshaper that adds harmonics organically
+  // (the way a real exhaust does) and a generous broadband noise body for
+  // mechanical character.
+  //
+  //   bass    — triangle at profile.bassFreq, the soft fundamental
+  //   mid     — triangle at 2× bass, body warmth
+  //   high    — triangle at 4× bass, intake "whine" that comes in with throttle
+  //   noise   — broadband filtered brown noise, the always-on mechanical body
+  //   shaper  — tanh soft-clip; drive scales with throttle for "growl"
+  //   lfo     — tremolo at firing-rhythm rate; uneven combustion feel
+  //   lp      — lowpass that opens with throttle (throttle plate)
 
   const out = ctx.createGain();
   out.gain.value = 0.0001;
   out.connect(dest);
 
+  // All triangles. Triangle has soft odd harmonics that fall off faster than
+  // saw/square — clean, woody fundamental rather than buzzy. The waveshaper
+  // downstream re-adds richness in a non-mathematical way.
   const bass = ctx.createOscillator();
-  bass.type = 'sawtooth';
+  bass.type = 'triangle';
   bass.frequency.value = profile.bassFreq;
   const mid = ctx.createOscillator();
-  mid.type = 'square';
+  mid.type = 'triangle';
   mid.frequency.value = profile.bassFreq * 2;
   const high = ctx.createOscillator();
-  high.type = 'sawtooth';
+  high.type = 'triangle';
   high.frequency.value = profile.bassFreq * 4;
 
   const bassGain = ctx.createGain();
-  bassGain.gain.value = 0.45;
+  bassGain.gain.value = 0.5;
   const midGain = ctx.createGain();
-  midGain.gain.value = 0.28;
+  midGain.gain.value = 0.32;
   const highGain = ctx.createGain();
   highGain.gain.value = 0.0; // off at idle, comes in with throttle
 
+  // Noise body. Wider band (lower Q) plus a small lowpass shaping so it
+  // reads as broadband mechanical wash rather than a narrow tonal hum.
+  // Idle gain is non-zero so the engine has audible texture even at rest —
+  // the missing ingredient that made the old version sound like pure tone.
   const noise = ctx.createBufferSource();
   noise.buffer = brownNoiseBuffer(ctx, 4);
   noise.loop = true;
   const noiseBp = ctx.createBiquadFilter();
   noiseBp.type = 'bandpass';
-  noiseBp.frequency.value = 220;
-  noiseBp.Q.value = 1.2;
+  noiseBp.frequency.value = 260;
+  noiseBp.Q.value = 0.45;
   const noiseGain = ctx.createGain();
-  noiseGain.gain.value = 0.0;
+  noiseGain.gain.value = 0.18; // audible at idle
 
   const sum = ctx.createGain();
   sum.gain.value = 0.5;
@@ -480,11 +517,29 @@ export function startEngine(profile: EngineProfile = DEFAULT_ENGINE): EngineHand
   high.connect(highGain).connect(sum);
   noise.connect(noiseBp).connect(noiseGain).connect(sum);
 
+  // Soft-clip stage. `drive` scales the input into the shaper — clean at
+  // idle, more harmonic distortion as throttle rises. This is what gives
+  // the engine an organic exhaust voice instead of a synth-y tone.
+  const drive = ctx.createGain();
+  drive.gain.value = 1.0;
+  const shaper = ctx.createWaveShaper();
+  // Cast: TS infers Float32Array<ArrayBufferLike> from the constructor but
+  // the WaveShaper API wants the narrower ArrayBuffer-backed view.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  shaper.curve = saturationCurve() as any;
+  shaper.oversample = '4x';
+  // Compensate for the gain the shaper adds back so total loudness stays
+  // close to the un-saturated path.
+  const postShaper = ctx.createGain();
+  postShaper.gain.value = 0.7;
+
+  sum.connect(drive).connect(shaper).connect(postShaper);
+
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = profile.filterBaseHz;
   lp.Q.value = 1.2;
-  sum.connect(lp);
+  postShaper.connect(lp);
 
   // Tremolo: LFO modulates pulseGain.gain. AudioParam value is summed with
   // any connected source's signal, so pulseGain swings around 1.0 by ±depth.
@@ -517,7 +572,11 @@ export function startEngine(profile: EngineProfile = DEFAULT_ENGINE): EngineHand
       out.gain.setTargetAtTime(profile.masterIdle + t * profile.masterPeak, now, 0.07);
       // Intake whine and mechanical roar both fade in with throttle.
       highGain.gain.setTargetAtTime(t * profile.highGainMax, now, 0.06);
-      noiseGain.gain.setTargetAtTime(t * profile.noiseGainMax, now, 0.07);
+      // Idle noise is already audible; throttle stacks more on top.
+      noiseGain.gain.setTargetAtTime(0.18 + t * profile.noiseGainMax, now, 0.07);
+      // Drive into the soft-clipper grows with throttle — gives the engine
+      // a "growl" when floored that's harmonic, not just louder.
+      drive.gain.setTargetAtTime(1.0 + t * 1.8, now, 0.08);
       // Throttle plate: filter opens, resonance climbs.
       lp.frequency.setTargetAtTime(profile.filterBaseHz + t * profile.filterOpenRange, now, 0.08);
       lp.Q.setTargetAtTime(1.0 + t * profile.filterQPeak, now, 0.08);
@@ -576,7 +635,7 @@ export function startEngine(profile: EngineProfile = DEFAULT_ENGINE): EngineHand
 //              with throttle. THIS is what makes it sound like a jet.
 //   buzzsaw  — second sawtooth at ~1.5× whine, slightly detuned, gives the
 //              chorused turbine character of a multi-stage compressor.
-export function startAirplaneEngine(): EngineHandle | null {
+export function startAirplaneEngine(opts?: { spatial?: boolean }): EngineHandle | null {
   resumeIfSuspended();
   const ctx = getAudioContext();
   const dest = getSfxNode();
@@ -584,7 +643,24 @@ export function startAirplaneEngine(): EngineHandle | null {
 
   const out = ctx.createGain();
   out.gain.value = 0.0001;
-  out.connect(dest);
+  // Optional 3D positional routing: insert a PannerNode between the engine
+  // graph and the SFX bus so the engine fades + pans by world position.
+  // Tuned for an airliner overhead — refDistance is loose so the engine is
+  // still audible when the plane is a few hundred metres away, with an
+  // inverse rolloff that drops naturally past that.
+  let panner: PannerNode | null = null;
+  if (opts?.spatial) {
+    panner = ctx.createPanner();
+    panner.panningModel = 'HRTF';
+    panner.distanceModel = 'inverse';
+    panner.refDistance = 90;
+    panner.maxDistance = 2000;
+    panner.rolloffFactor = 1.2;
+    out.connect(panner);
+    panner.connect(dest);
+  } else {
+    out.connect(dest);
+  }
 
   // Master lowpass — opens up with speed so the jet brightens at cruise.
   const lp = ctx.createBiquadFilter();
@@ -725,6 +801,16 @@ export function startAirplaneEngine(): EngineHandle | null {
       lp.frequency.setTargetAtTime(2800 + s * 3500, now, 0.4);
       applyWhinePitch();
     },
+    setPosition: panner
+      ? (x: number, y: number, z: number) => {
+          if (stopped || !ctx) return;
+          const now = ctx.currentTime;
+          // Smooth ramp so per-frame position updates don't zipper-noise.
+          panner!.positionX.setTargetAtTime(x, now, 0.08);
+          panner!.positionY.setTargetAtTime(y, now, 0.08);
+          panner!.positionZ.setTargetAtTime(z, now, 0.08);
+        }
+      : undefined,
     stop: () => {
       if (stopped) return;
       stopped = true;
@@ -738,6 +824,7 @@ export function startAirplaneEngine(): EngineHandle | null {
           whine.stop();
           buzz.stop();
           out.disconnect();
+          panner?.disconnect();
         } catch {
           // already stopped
         }
@@ -810,7 +897,7 @@ export function startCockpitWarning(): CockpitWarningHandle | null {
   const interval = window.setInterval(scheduleSteps, 1500);
 
   osc.start(t0);
-  out.gain.setTargetAtTime(0.45, t0, 0.03);
+  out.gain.setTargetAtTime(0.22, t0, 0.03);
 
   let stopped = false;
   return {

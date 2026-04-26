@@ -21,8 +21,8 @@ const BODY_KINEMATIC_POSITION = 2;
 // Pitch magnitude (radians) at which the cockpit warning alarm starts and
 // stops. Two thresholds give a hysteresis band so a pitch that hovers right
 // at the limit doesn't chatter the audio on/off. 15° on, 12° off.
-const WARN_PITCH_ON = (15 * Math.PI) / 180;
-const WARN_PITCH_OFF = (12 * Math.PI) / 180;
+const WARN_PITCH_ON = (20 * Math.PI) / 180;
+const WARN_PITCH_OFF = (18 * Math.PI) / 180;
 
 // Debounce: when pitch first crosses ON, wait this long and re-check before
 // firing the alarm. Filters out transient maneuvers (a quick pull-up or

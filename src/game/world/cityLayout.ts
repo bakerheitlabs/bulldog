@@ -84,7 +84,7 @@ export type ParkCell = {
 
 export type Cell = RoadCell | BuildingCell | ParkingLotCell | ParkCell;
 
-const BUILDING_COLORS = [
+export const BUILDING_COLORS = [
   '#6a7280',
   '#7f6a4d',
   '#5f6b73',

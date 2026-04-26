@@ -52,7 +52,7 @@ export function useCarDriver({ id, rigidRef, paused, variant }: Options) {
   const engineRef = useRef<EngineHandle | null>(null);
   const sirenRef = useRef<SirenHandle | null>(null);
   const initializedRef = useRef(false);
-  const stateRef = useRef({ yaw: 0, speed: 0, y: 0 });
+  const stateRef = useRef({ yaw: 0, speed: 0, x: 0, y: 0, z: 0 });
   const tmpPos = useRef(new THREE.Vector3());
   const tmpQuat = useRef(new THREE.Quaternion());
 
@@ -141,11 +141,15 @@ export function useCarDriver({ id, rigidRef, paused, variant }: Options) {
     };
   }, [isDriven, sirenOn]);
 
-  useFrame((_, dt) => {
+  useFrame((_, rawDt) => {
     if (!isDriven) return;
     const r = rigidRef.current;
     if (!r) return;
     if (paused) return;
+    // Clamp dt so a frame hitch (e.g. chunk re-mount, GLB instancing) can't
+    // translate into a giant integration step at high speed. 1/30s is the
+    // ceiling: above that, we'd rather under-step the world than teleport.
+    const dt = Math.min(rawDt, 1 / 30);
     // Belt-and-suspenders: @react-three/rapier re-applies the static `type`
     // prop on certain re-renders, which can silently flip the body back to
     // Dynamic mid-drive. We've memoized every unstable prop on Car's
@@ -168,7 +172,9 @@ export function useCarDriver({ id, rigidRef, paused, variant }: Options) {
     if (!initializedRef.current) {
       s.yaw = quatToYaw(r.rotation());
       const t = r.translation();
+      s.x = t.x;
       s.y = t.y;
+      s.z = t.z;
       const v = r.linvel();
       s.speed = v.x * Math.sin(s.yaw) + v.z * Math.cos(s.yaw);
       snapCameraYawBehind(s.yaw);
@@ -177,8 +183,7 @@ export function useCarDriver({ id, rigidRef, paused, variant }: Options) {
 
     if (isCarDestroyed(damage)) {
       // Destroyed: freeze in place, kill audio. Integrator pauses.
-      const t = r.translation();
-      r.setNextKinematicTranslation({ x: t.x, y: t.y, z: t.z });
+      r.setNextKinematicTranslation({ x: s.x, y: s.y, z: s.z });
       engineRef.current?.setThrottle(0);
       engineRef.current?.setSpeed(0);
       return;
@@ -206,12 +211,15 @@ export function useCarDriver({ id, rigidRef, paused, variant }: Options) {
     s.speed = next.speed;
     const sp = s.speed;
 
+    // Integrate position purely in stateRef. Reading r.translation() each
+    // frame would let @react-three/rapier's sub-frame body interpolation feed
+    // back into the integrator, producing tiny non-monotonic steps that show
+    // up as micro-jitter at speed.
     const fx = Math.sin(s.yaw);
     const fz = Math.cos(s.yaw);
-    const t = r.translation();
-    const nx = t.x + fx * sp * dt;
-    const nz = t.z + fz * sp * dt;
-    r.setNextKinematicTranslation({ x: nx, y: s.y, z: nz });
+    s.x += fx * sp * dt;
+    s.z += fz * sp * dt;
+    r.setNextKinematicTranslation({ x: s.x, y: s.y, z: s.z });
     tmpQuat.current.setFromAxisAngle(_Y_AXIS, s.yaw);
     r.setNextKinematicRotation({
       x: tmpQuat.current.x,
@@ -220,7 +228,7 @@ export function useCarDriver({ id, rigidRef, paused, variant }: Options) {
       w: tmpQuat.current.w,
     });
 
-    tmpPos.current.set(nx, s.y, nz);
+    tmpPos.current.set(s.x, s.y, s.z);
     writeDrivenCarPose(tmpPos.current, s.yaw);
     engineRef.current?.setThrottle(throttle);
     engineRef.current?.setSpeed(Math.abs(sp) / topSpeed);

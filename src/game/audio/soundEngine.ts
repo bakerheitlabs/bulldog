@@ -42,6 +42,27 @@ export function resumeIfSuspended() {
   if (c && c.state === 'suspended') void c.resume();
 }
 
+// Update the AudioListener position in world space. Spatial sound sources
+// (PannerNode) pan and attenuate relative to this. Caller is expected to
+// drive this from the player's world position each frame so a moving
+// listener (player walking / driving) tracks correctly.
+export function setAudioListenerPosition(x: number, y: number, z: number) {
+  const c = getAudioContext();
+  if (!c) return;
+  const l = c.listener;
+  // Modern API uses AudioParams (positionX/Y/Z) so values can ramp; older
+  // Safari fell back to the deprecated setPosition(). Prefer the AudioParam
+  // path with a short smoothing constant so per-frame updates don't zipper.
+  if ((l as unknown as { positionX?: AudioParam }).positionX) {
+    const now = c.currentTime;
+    (l.positionX as AudioParam).setTargetAtTime(x, now, 0.05);
+    (l.positionY as AudioParam).setTargetAtTime(y, now, 0.05);
+    (l.positionZ as AudioParam).setTargetAtTime(z, now, 0.05);
+  } else if ((l as unknown as { setPosition?: (x: number, y: number, z: number) => void }).setPosition) {
+    (l as unknown as { setPosition: (x: number, y: number, z: number) => void }).setPosition(x, y, z);
+  }
+}
+
 export function disposeAudio() {
   unsubVolume?.();
   unsubVolume = null;

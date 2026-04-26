@@ -1,5 +1,6 @@
 import { CuboidCollider, RigidBody } from '@react-three/rapier';
 import DrivableAirplane from '@/game/airplanes/DrivableAirplane';
+import ScheduledFlight from '@/game/airplanes/ScheduledFlight';
 import { AIRPORT } from './airport';
 
 const PAD_COLOR = '#3f4147';
@@ -281,6 +282,7 @@ export default function AirportRegion({ paused }: { paused: boolean }) {
           paused={paused}
         />
       ))}
+      <ScheduledFlight paused={paused} />
     </group>
   );
 }

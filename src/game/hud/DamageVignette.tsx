@@ -22,6 +22,10 @@ export default function DamageVignette() {
       const id = window.setTimeout(() => setFlash(0), FADE_MS);
       return () => window.clearTimeout(id);
     }
+    if (health > prev) {
+      // Heals (e.g. hospital respawn) should immediately drop any lingering flash.
+      setFlash(0);
+    }
   }, [health]);
 
   const critical = health > 0 && health <= CRITICAL_HP;

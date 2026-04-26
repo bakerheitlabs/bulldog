@@ -78,7 +78,7 @@ export const VEHICLE_IDENTITY: Record<VehicleIdentityKey, VehicleIdentity> = {
     model: 'Stratum',
     topSpeed: 22,
     engine: {
-      bassFreq: 50,
+      bassFreq: 38,
       rpmRange: 0.9,
       masterIdle: 0.07,
       masterPeak: 0.10,
@@ -97,7 +97,7 @@ export const VEHICLE_IDENTITY: Record<VehicleIdentityKey, VehicleIdentity> = {
     model: 'Razor',
     topSpeed: 32,
     engine: {
-      bassFreq: 45,
+      bassFreq: 34,
       rpmRange: 1.2,
       masterIdle: 0.08,
       masterPeak: 0.13,
@@ -116,7 +116,7 @@ export const VEHICLE_IDENTITY: Record<VehicleIdentityKey, VehicleIdentity> = {
     model: 'Asco',
     topSpeed: 29,
     engine: {
-      bassFreq: 65,
+      bassFreq: 49,
       rpmRange: 1.4,
       masterIdle: 0.07,
       masterPeak: 0.14,
@@ -135,7 +135,7 @@ export const VEHICLE_IDENTITY: Record<VehicleIdentityKey, VehicleIdentity> = {
     model: 'Rush',
     topSpeed: 36,
     engine: {
-      bassFreq: 48,
+      bassFreq: 36,
       rpmRange: 1.55,
       masterIdle: 0.08,
       masterPeak: 0.16,
@@ -154,7 +154,7 @@ export const VEHICLE_IDENTITY: Record<VehicleIdentityKey, VehicleIdentity> = {
     model: 'Pathway',
     topSpeed: 22,
     engine: {
-      bassFreq: 42,
+      bassFreq: 32,
       rpmRange: 0.7,
       masterIdle: 0.08,
       masterPeak: 0.10,
@@ -173,7 +173,7 @@ export const VEHICLE_IDENTITY: Record<VehicleIdentityKey, VehicleIdentity> = {
     model: 'Veneer',
     topSpeed: 25,
     engine: {
-      bassFreq: 40,
+      bassFreq: 30,
       rpmRange: 0.85,
       masterIdle: 0.05,
       masterPeak: 0.08,
@@ -192,7 +192,7 @@ export const VEHICLE_IDENTITY: Record<VehicleIdentityKey, VehicleIdentity> = {
     model: 'Cabbie',
     topSpeed: 23,
     engine: {
-      bassFreq: 55,
+      bassFreq: 41,
       rpmRange: 0.85,
       masterIdle: 0.09,
       masterPeak: 0.10,
@@ -211,7 +211,7 @@ export const VEHICLE_IDENTITY: Record<VehicleIdentityKey, VehicleIdentity> = {
     model: 'Hauler',
     topSpeed: 18,
     engine: {
-      bassFreq: 38,
+      bassFreq: 29,
       rpmRange: 0.6,
       masterIdle: 0.08,
       masterPeak: 0.10,
@@ -230,7 +230,7 @@ export const VEHICLE_IDENTITY: Record<VehicleIdentityKey, VehicleIdentity> = {
     model: 'Enforcer',
     topSpeed: 30,
     engine: {
-      bassFreq: 40,
+      bassFreq: 30,
       rpmRange: 1.3,
       masterIdle: 0.09,
       masterPeak: 0.15,

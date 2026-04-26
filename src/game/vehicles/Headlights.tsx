@@ -2,12 +2,12 @@ import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
 // Source positions match where the Kenney colormap paints headlights onto the
-// 4 m-long car body: ~50% out from center, low on the front face, just at the
-// front bumper. Tuned so the spotlight cone visually emanates from the
-// painted headlight on the model rather than a point in front of it.
-const SOURCE_OFFSET_X = 0.55;
-const SOURCE_OFFSET_Y = 0.30;
-const SOURCE_OFFSET_Z = 1.95;
+// 4 m-long car body: ~45% out from center, low on the front face, tucked
+// right at the front bumper. Tuned so the spotlight cone visually emanates
+// from the painted headlight on the model rather than a point in front of it.
+const SOURCE_OFFSET_X = 0.48;
+const SOURCE_OFFSET_Y = 0.24;
+const SOURCE_OFFSET_Z = 1.82;
 
 // Aim the beam ~8 m ahead and below floor level so the cone tilts down onto
 // the road instead of running parallel to the horizon.
@@ -15,9 +15,9 @@ const TARGET_FORWARD_Z = 8;
 const TARGET_Y = -1.6;
 
 const BEAM_COLOR = '#fff5d6';
-const BEAM_INTENSITY = 28;
-const BEAM_DISTANCE = 22;
-const BEAM_ANGLE = 0.55;
+const BEAM_INTENSITY = 22;
+const BEAM_DISTANCE = 16;
+const BEAM_ANGLE = 0.4;
 const BEAM_PENUMBRA = 0.55;
 const BEAM_DECAY = 1.6;
 

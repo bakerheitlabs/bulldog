@@ -34,9 +34,13 @@ export default function ThirdPersonCamera({ target }: { target: CameraTarget }) 
     camera.updateProjectionMatrix();
   }, [camera, fov]);
 
-  useFrame((_, dt) => {
+  useFrame((_, rawDt) => {
     const pos = target.getPosition();
     if (!pos) return;
+    // Clamp dt so a frame hitch (chunk re-mount, GLB instancing) can't make
+    // the exponential lerp jump most of the way to the target in one frame —
+    // that "snap" is what reads as jitter when entering a new chunk at speed.
+    const dt = Math.min(rawDt, 1 / 30);
     if (!cameraState.orbiting) {
       const decay = 1 - Math.exp(-dt * 8);
       cameraState.orbitYaw += (0 - cameraState.orbitYaw) * decay;
