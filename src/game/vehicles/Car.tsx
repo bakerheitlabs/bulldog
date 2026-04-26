@@ -4,6 +4,7 @@ import {
   type CollisionEnterPayload,
   type RapierRigidBody,
 } from '@react-three/rapier';
+import { ActiveCollisionTypes } from '@dimforge/rapier3d-compat';
 import { Detailed } from '@react-three/drei';
 import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import * as THREE from 'three';
@@ -44,6 +45,10 @@ type Props = {
   // Rendered alongside the rigid body — used by DrivenCar / PoliceCruiser for
   // ejected drivers, police lights, etc. Not a DOM child of the rigid body.
   children?: React.ReactNode;
+  // Called when this car is hit by another vehicle above the impact threshold.
+  // Used by AI cars to switch from kinematic-on-rails into dynamic "disturbed"
+  // mode so the player's car can shove them around like physical debris.
+  onImpact?: (otherBody: RapierRigidBody | null, closingSpeed: number) => void;
 };
 
 // Far-LOD silhouette: body + roof + four wheel stubs. Lambert + no shadows
@@ -126,6 +131,7 @@ export default function Car({
   fallbackColor = '#888',
   paused,
   children,
+  onImpact,
 }: Props) {
   const drivenCarId = useVehicleStore((s) => s.drivenCarId);
   const storeColor = useVehicleStore((s) => s.carColors[id]);
@@ -166,13 +172,23 @@ export default function Car({
         const pdmg = Math.min(80, carSpeed * 5);
         useGameStore.getState().damagePlayer(pdmg);
       }
+      // Vehicle-vs-vehicle: notify the wrapper using *closing* speed so an
+      // AI car that gets rammed by a stopped player at speed reacts the same
+      // as the player rear-ending stationary traffic. Both kinematic and
+      // dynamic bodies report linvel() (kinematic derives it from the next
+      // position delta), so this works regardless of body type.
+      if (otherType === 'vehicle' && onImpact) {
+        const ov = other?.linvel() ?? { x: 0, z: 0 };
+        const closing = Math.hypot(v.x - ov.x, v.z - ov.z);
+        if (closing >= CAR_IMPACT_THRESHOLD) onImpact(other ?? null, closing);
+      }
       // Only damage the car if IT was moving fast — walking into a parked car
       // shouldn't dent it.
       if (carSpeed < CAR_IMPACT_THRESHOLD) return;
       const dmg = Math.min(35, (carSpeed - CAR_IMPACT_THRESHOLD) * 4);
       useVehicleStore.getState().damageCarBy(id, dmg);
     },
-    [id, rigidRef],
+    [id, rigidRef, onImpact],
   );
 
   const getSmokePos = useCallback(() => {
@@ -238,7 +254,18 @@ export default function Car({
         userData={userData}
         onCollisionEnter={onHit}
       >
-        <CuboidCollider args={CAR_COLLIDER_HALF} />
+        {/* Rapier's DEFAULT active collision types omit kinematic↔kinematic
+            pair generation, so when the player car (kinematic-while-driven)
+            contacts an AI car (also kinematic) no contact pairs are created
+            and onCollisionEnter never fires. ALL enables every combination
+            (dynamic, kinematic, fixed) so we get events regardless of which
+            body types are in play. K↔K still doesn't *resolve* contacts —
+            disturb logic in DrivenCar handles that by switching the rammed
+            car to dynamic on the first event. */}
+        <CuboidCollider
+          args={CAR_COLLIDER_HALF}
+          activeCollisionTypes={ActiveCollisionTypes.ALL}
+        />
         <GltfBoundary
           fallback={<PrimitiveCar color={activeColor} isDriven={isDriven} />}
         >

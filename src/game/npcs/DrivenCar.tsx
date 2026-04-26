@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { RapierRigidBody } from '@react-three/rapier';
 import { yawForLaneDir } from '@/game/world/cityLayout';
@@ -11,6 +11,9 @@ import {
   pickRandomNeighbor,
   useAiWaypointDriver,
 } from '@/game/vehicles/useAiWaypointDriver';
+
+// Rapier body types. 0 = Dynamic.
+const BODY_DYNAMIC = 0;
 
 // Ambient traffic moves slower than the player can. We sample each variant's
 // top speed and clamp into a tight band so a sports car still cruises a
@@ -60,12 +63,17 @@ export default function DrivenCar({
   const isDriven = drivenCarId === id;
   const [stolen, setStolen] = useState(false);
   const [ejectPos, setEjectPos] = useState<[number, number, number] | null>(null);
+  // Once an ambient AI car gets rammed by another vehicle, the waypoint
+  // follower steps aside and the body becomes Dynamic so it can be shoved
+  // around by physics. No re-merge into traffic in v1 — disturbed cars stay
+  // disturbed.
+  const [disturbed, setDisturbed] = useState(false);
 
   useAiWaypointDriver({
     id,
     rigidRef: rigid,
     startId,
-    disabled: isDriven || stolen || paused,
+    disabled: isDriven || stolen || paused || disturbed,
     debug,
     getConfig: () => ({
       speed: aiSpeed,
@@ -73,6 +81,28 @@ export default function DrivenCar({
       obeyLights: true,
     }),
   });
+
+  const handleImpact = useCallback(
+    (other: RapierRigidBody | null) => {
+      if (disturbed) return;
+      const r = rigid.current;
+      if (!r) return;
+      // Switch off the AI's kinematic rails so the player's car (also
+      // kinematic while driven) can resolve against us via dynamic-vs-
+      // kinematic contact on the next physics step.
+      r.setBodyType(BODY_DYNAMIC, true);
+      r.wakeUp();
+      // Carry over the impactor's velocity so the rammed car visibly slides
+      // in the direction it was hit instead of being statue-stiff for one
+      // frame before gravity catches it.
+      const ov = other?.linvel();
+      if (ov) {
+        r.setLinvel({ x: ov.x * 0.6, y: 0, z: ov.z * 0.6 }, true);
+      }
+      setDisturbed(true);
+    },
+    [disturbed],
+  );
 
   // First time the player takes this car, eject the driver alongside.
   useEffect(() => {
@@ -103,6 +133,7 @@ export default function DrivenCar({
       variant={variant}
       fallbackColor={color}
       paused={paused}
+      onImpact={handleImpact}
     >
       {ejectPos && <EjectedDriver seed={seed * 53 + 7} startPos={ejectPos} />}
     </Car>
