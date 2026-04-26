@@ -2,7 +2,6 @@ import { useMemo } from 'react';
 import * as THREE from 'three';
 import { ROAD_WIDTH } from './cityLayout';
 import {
-  SUBURBS,
   sampleSplineRange,
   trimForAnchor,
   type Junction,
@@ -10,6 +9,7 @@ import {
   type SplineSample,
   type Suburb,
 } from './suburbs';
+import { SPLINE_REGIONS } from './splineRegions';
 
 const ASPHALT_COLOR = '#2d2d33';
 const LINE_COLOR = '#d8c46a';
@@ -249,7 +249,7 @@ function SuburbGroup({ suburb }: { suburb: Suburb }) {
 export default function SuburbRoads() {
   return (
     <group>
-      {SUBURBS.map((s) => (
+      {SPLINE_REGIONS.map((s) => (
         <SuburbGroup key={s.id} suburb={s} />
       ))}
     </group>

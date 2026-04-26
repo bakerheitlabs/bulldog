@@ -1,23 +1,14 @@
-import { CuboidCollider, RigidBody } from '@react-three/rapier';
-import { CITY_DEPTH, CITY_WIDTH } from './cityLayout';
 import { useVisibleCells } from './Chunks';
 
-const GROUND_SIZE = Math.max(CITY_WIDTH, CITY_DEPTH) * 2;
+// The base grass plane and ground collider live on the Island component now.
+// This module just paints per-cell surface colors (block / park / parking
+// lot) on top of that grass and scatters trees in parks.
 const BUILDING_BLOCK_COLOR = '#55585c';
 
 export default function GroundAndProps() {
   const cells = useVisibleCells();
   return (
     <group>
-      {/* infinite-ish ground plane (collider only — visual is per-cell) */}
-      <RigidBody type="fixed" colliders={false}>
-        <CuboidCollider args={[GROUND_SIZE / 2, 0.1, GROUND_SIZE / 2]} position={[0, -0.1, 0]} />
-      </RigidBody>
-      {/* base grass/asphalt color underneath everything */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-        <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
-        <meshStandardMaterial color="#3a4a39" />
-      </mesh>
       {/* city blocks, parks, and parking lots get their own surface color */}
       {cells.map(({ col, row, cell, center, size }) => {
         if (cell.kind !== 'building' && cell.kind !== 'park' && cell.kind !== 'parkingLot') {

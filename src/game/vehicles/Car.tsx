@@ -4,6 +4,7 @@ import {
   type CollisionEnterPayload,
   type RapierRigidBody,
 } from '@react-three/rapier';
+import { Detailed } from '@react-three/drei';
 import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import { useGameStore } from '@/state/gameStore';
@@ -44,6 +45,39 @@ type Props = {
   // ejected drivers, police lights, etc. Not a DOM child of the rigid body.
   children?: React.ReactNode;
 };
+
+// Far-LOD silhouette: body + roof + four wheel stubs. Lambert + no shadows
+// keeps the fragment cost trivial. At ≥100m the player sees a 5-10px tall
+// silhouette, so single-mesh wheels are plenty — they just need to be there
+// so the car reads as a car instead of a floating brick.
+const LOW_LOD_WHEEL_POSITIONS: Array<[number, number, number]> = [
+  [0.85, -0.2, 1.35],
+  [-0.85, -0.2, 1.35],
+  [0.85, -0.2, -1.35],
+  [-0.85, -0.2, -1.35],
+];
+const LOW_LOD_WHEEL_COLOR = '#1a1a1a';
+
+function LowDetailCar({ color }: { color: string }) {
+  return (
+    <group>
+      <mesh>
+        <boxGeometry args={[1.8, 0.9, 4]} />
+        <meshLambertMaterial color={color} />
+      </mesh>
+      <mesh position={[0, 0.55, -0.2]}>
+        <boxGeometry args={[1.6, 0.5, 2.2]} />
+        <meshLambertMaterial color={color} />
+      </mesh>
+      {LOW_LOD_WHEEL_POSITIONS.map((pos, i) => (
+        <mesh key={i} position={pos}>
+          <boxGeometry args={[0.35, 0.45, 0.55]} />
+          <meshLambertMaterial color={LOW_LOD_WHEEL_COLOR} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
 
 function PrimitiveCar({ color, isDriven }: { color: string; isDriven: boolean }) {
   return (
@@ -207,12 +241,27 @@ export default function Car({
         <GltfBoundary
           fallback={<PrimitiveCar color={activeColor} isDriven={isDriven} />}
         >
-          <CarModel
-            variant={variant}
-            tint={storeColor}
-            getSpeed={getForwardSpeed}
-            siren={isPolice && sirenOn}
-          />
+          {/* Drei's <Detailed> wraps THREE.LOD: it shows child[0] within
+              100m of the camera and child[1] beyond. `hysteresis` is a
+              FRACTION of the level distance (NOT meters) — 0.1 means the
+              transition back to high-detail happens at 90m, suppressing
+              flicker when the player oscillates around the threshold. The
+              upper bound is high enough that police siren caps and tail
+              lights stay legible at the distances they actually matter — a
+              cop chase reads as cop colors well before the LOD swap. */}
+          <Detailed distances={[0, 100]} hysteresis={0.1}>
+            <group>
+              <CarModel
+                variant={variant}
+                tint={storeColor}
+                getSpeed={getForwardSpeed}
+                siren={isPolice && sirenOn}
+              />
+            </group>
+            <group>
+              <LowDetailCar color={activeColor} />
+            </group>
+          </Detailed>
         </GltfBoundary>
         <Headlights enabled={isNight} castBeams={isDriven} />
       </RigidBody>

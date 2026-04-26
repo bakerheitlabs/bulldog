@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import City from './world/City';
 import DayNightLighting from './world/DayNightLighting';
+import WeatherEffects from './world/WeatherEffects';
 import Player from './player/Player';
 import ThirdPersonCamera, { type CameraTarget } from './player/ThirdPersonCamera';
 import { usePointerLook } from './player/usePointerLook';
@@ -21,15 +22,24 @@ import { startCityAmbient, type AmbientHandle } from './audio/synth';
 import { resumeIfSuspended } from './audio/soundEngine';
 import DrivableCars from './vehicles/DrivableCars';
 import { useVehicleInteraction } from './vehicles/useVehicleInteraction';
-import { readDrivenCarPos, useVehicleStore } from './vehicles/vehicleState';
+import {
+  readDrivenCarPos,
+  readDrivenPlanePos,
+  useVehicleStore,
+} from './vehicles/vehicleState';
 import { useGameStore } from '@/state/gameStore';
 
 function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () => void }) {
   const playerRef = useRef<RapierRigidBody | null>(null);
   const tmp = useRef(new THREE.Vector3());
   const drivenCarId = useVehicleStore((s) => s.drivenCarId);
+  const drivenPlaneId = useVehicleStore((s) => s.drivenPlaneId);
   const camTarget: CameraTarget = {
     getPosition: () => {
+      if (drivenPlaneId) {
+        const p = readDrivenPlanePos();
+        if (p) return p;
+      }
       if (drivenCarId) {
         const p = readDrivenCarPos();
         if (p) return p;
@@ -42,7 +52,7 @@ function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () 
     },
   };
 
-  const combatPaused = paused || drivenCarId != null;
+  const combatPaused = paused || drivenCarId != null || drivenPlaneId != null;
   useWeaponController({ paused: combatPaused });
   useMeleeController({ paused: combatPaused });
   useVehicleInteraction(!paused);
@@ -50,7 +60,8 @@ function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () 
   return (
     <>
       <DayNightLighting />
-      <City />
+      <WeatherEffects />
+      <City paused={paused} />
       <Spawner paused={paused} />
       <DebugTraffic paused={paused} />
       <Range />
@@ -137,7 +148,13 @@ export default function Game({
   return (
     <Canvas
       shadows
-      camera={{ position: [0, 5, 10], fov: 70, near: 0.1, far: 500 }}
+      camera={{ position: [0, 5, 10], fov: 70, near: 0.1, far: 3500 }}
+      // Roads, sidewalks, and lane stripes are stacked at Y=0/0.01/0.02 to
+      // imply layering. With a 0.1→1500 frustum the standard z-buffer can't
+      // resolve a 1cm gap at 100m+ camera distance, so the stripes flicker
+      // when flying high. Logarithmic depth gives near-uniform precision
+      // across the full range and fixes this universally for ~free.
+      gl={{ logarithmicDepthBuffer: true }}
       style={{ position: 'absolute', inset: 0 }}
     >
       <Suspense fallback={null}>

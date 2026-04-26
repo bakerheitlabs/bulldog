@@ -13,27 +13,35 @@ export const LANE_OFFSET = 2; // right-lane offset from centerline
 // double as buffer between road and adjacent block sidewalks.
 export const ROAD_STRIP_WIDTH = ROAD_WIDTH + SIDEWALK_WIDTH * 2;
 
-// 15x15 with a road on every odd col/row — 7×7 arterial intersections.
-export const COLS = 15;
-export const ROWS = 15;
+// 25x25 with a road on every odd col/row — 12×12 road intersections.
+// Arterials sit at indices 1,5,9,13,17,21 → 6×6 arterial intersections.
+export const COLS = 25;
+export const ROWS = 25;
 const CITY_SEED = 1;
 
-// Gunstore near grid center; range in the far corner. Both pinned so the
-// player's spawn and the firing range stay stable across procedural cities.
-const GUNSTORE: [number, number] = [6, 6];
-const RANGE: [number, number] = [12, 12];
-const MECHANIC: [number, number] = [8, 6];
-const HOSPITAL: [number, number] = [4, 6];
+// Landmarks pinned so player spawn (gunstore-relative) and firing range stay
+// stable across procedural cities. Spread across the grid so the bigger map
+// doesn't herd everything into one quadrant.
+const GUNSTORE: [number, number] = [12, 12];
+const RANGE: [number, number] = [22, 22];
+const MECHANIC: [number, number] = [18, 8];
+const HOSPITAL: [number, number] = [4, 18];
 
-// Fixed parks + parking lots so the whole city doesn't wall-to-wall with buildings.
+// Fixed parks + parking lots so the whole city isn't wall-to-wall buildings.
+// All coords on even indices (odd = road).
 const PARKS: ReadonlyArray<[number, number]> = [
   [0, 0],
-  [14, 0],
-  [0, 14],
+  [24, 0],
+  [0, 24],
+  [24, 24],
+  [12, 2],
+  [2, 14],
 ];
 const PARKING_LOTS: ReadonlyArray<[number, number]> = [
-  [4, 8],
-  [10, 4],
+  [6, 6],
+  [18, 18],
+  [6, 18],
+  [18, 6],
 ];
 
 export type Vec3 = [number, number, number];

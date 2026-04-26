@@ -1,12 +1,10 @@
 import { useFrame } from '@react-three/fiber';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   allCells,
   cellCenter,
   cellSize,
-  COLS,
   getCell,
-  ROWS,
   worldToCell,
   type CellInfo,
 } from './cityLayout';
@@ -15,28 +13,55 @@ import { readDrivenCarPos, useVehicleStore } from '@/game/vehicles/vehicleState'
 
 const CHUNK_SIZE = 3; // cells per chunk side
 // Chunks around the player to keep mounted. 1 = 3x3 chunk block = 9x9 = 81
-// cells visible — plenty for camera distance while leaving most of the 15x15
-// city culled.
+// cells visible. A small radius keeps in-city draw cost down — the off-grid
+// fallback below handles "looking back at the city from a highway."
 const VIEW_RADIUS = 1;
 
-function playerChunk(): [number, number] {
-  let px: number;
-  let pz: number;
+// Off-grid (airport highway, airport pad) we can't use the chunk grid because
+// the chunk grid only covers the city. Fall back to a distance-based window
+// around the player, throttled by snapping to OFF_GRID_SNAP_M so we re-build
+// the visible list at the same cadence the on-grid path does.
+const OFF_GRID_SNAP_M = 90; // recompute when the player moves this far
+const OFF_GRID_VIEW_M = 600; // cells within this radius are eligible
+const OFF_GRID_MAX_CELLS = 180; // hard cap on how many cells we draw at once
+
+export type ChunkKey =
+  | { kind: 'on-grid'; cc: number; cr: number }
+  | { kind: 'off-grid'; sx: number; sz: number; px: number; pz: number };
+
+export function getPlayerPos(): [number, number] {
   if (useVehicleStore.getState().drivenCarId) {
     const carPos = readDrivenCarPos();
-    if (carPos) {
-      px = carPos.x;
-      pz = carPos.z;
-    } else {
-      [px, , pz] = useGameStore.getState().player.position;
-    }
-  } else {
-    [px, , pz] = useGameStore.getState().player.position;
+    if (carPos) return [carPos.x, carPos.z];
   }
+  const [px, , pz] = useGameStore.getState().player.position;
+  return [px, pz];
+}
+
+export function playerChunk(): ChunkKey {
+  const [px, pz] = getPlayerPos();
   const cell = worldToCell(px, pz);
-  const col = cell ? cell.col : px < 0 ? 0 : COLS - 1;
-  const row = cell ? cell.row : pz < 0 ? 0 : ROWS - 1;
-  return [Math.floor(col / CHUNK_SIZE), Math.floor(row / CHUNK_SIZE)];
+  if (cell) {
+    return {
+      kind: 'on-grid',
+      cc: Math.floor(cell.col / CHUNK_SIZE),
+      cr: Math.floor(cell.row / CHUNK_SIZE),
+    };
+  }
+  return {
+    kind: 'off-grid',
+    sx: Math.floor(px / OFF_GRID_SNAP_M),
+    sz: Math.floor(pz / OFF_GRID_SNAP_M),
+    px,
+    pz,
+  };
+}
+
+export function chunksEqual(a: ChunkKey, b: ChunkKey): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'on-grid' && b.kind === 'on-grid') return a.cc === b.cc && a.cr === b.cr;
+  if (a.kind === 'off-grid' && b.kind === 'off-grid') return a.sx === b.sx && a.sz === b.sz;
+  return false;
 }
 
 function cellInChunkRange(col: number, row: number, cc: number, cr: number): boolean {
@@ -74,23 +99,51 @@ function withAnchors(cells: CellInfo[]): CellInfo[] {
   return Array.from(byKey.values());
 }
 
-// Hook: returns the list of cells visible for the current player chunk.
-// Re-renders the caller only when the player crosses a chunk boundary.
-export function useVisibleCells(): CellInfo[] {
+export function visibleForChunk(key: ChunkKey): CellInfo[] {
+  if (key.kind === 'on-grid') {
+    return withAnchors(
+      ALL.filter(({ col, row }) => cellInChunkRange(col, row, key.cc, key.cr)),
+    );
+  }
+  // Off-grid: take the N closest grid cells within the view radius. From the
+  // airport you only ever see the half of the city facing you anyway, so a
+  // capped nearest-N list keeps the draw call count bounded while still
+  // giving a city silhouette.
+  const r2 = OFF_GRID_VIEW_M * OFF_GRID_VIEW_M;
+  const ranked: { info: CellInfo; d2: number }[] = [];
+  for (const info of ALL) {
+    const dx = info.center[0] - key.px;
+    const dz = info.center[2] - key.pz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 <= r2) ranked.push({ info, d2 });
+  }
+  ranked.sort((a, b) => a.d2 - b.d2);
+  return withAnchors(ranked.slice(0, OFF_GRID_MAX_CELLS).map((r) => r.info));
+}
+
+// Returns the player's current chunk key. Re-renders only when the player
+// crosses a chunk boundary (on-grid) or moves OFF_GRID_SNAP_M off-grid.
+// Shared by `useVisibleCells` and the distant-LOD ring so both recompute on
+// the same cadence.
+export function useChunkKey(): ChunkKey {
   const initial = playerChunk();
-  const lastRef = useRef<[number, number]>(initial);
-  const [visible, setVisible] = useState<CellInfo[]>(() =>
-    withAnchors(
-      ALL.filter(({ col, row }) => cellInChunkRange(col, row, initial[0], initial[1])),
-    ),
-  );
+  const lastRef = useRef<ChunkKey>(initial);
+  const [key, setKey] = useState<ChunkKey>(initial);
 
   useFrame(() => {
-    const [cc, cr] = playerChunk();
-    if (cc === lastRef.current[0] && cr === lastRef.current[1]) return;
-    lastRef.current = [cc, cr];
-    setVisible(withAnchors(ALL.filter(({ col, row }) => cellInChunkRange(col, row, cc, cr))));
+    const cur = playerChunk();
+    if (chunksEqual(cur, lastRef.current)) return;
+    lastRef.current = cur;
+    setKey(cur);
   });
 
-  return visible;
+  return key;
+}
+
+// Hook: returns the list of cells visible for the current player chunk.
+// Re-renders the caller only when the player crosses a chunk boundary OR
+// when they cross the on-grid / off-grid boundary.
+export function useVisibleCells(): CellInfo[] {
+  const key = useChunkKey();
+  return useMemo(() => visibleForChunk(key), [key]);
 }

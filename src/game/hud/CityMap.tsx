@@ -16,7 +16,9 @@ import {
   CITY_WIDTH,
   SIDEWALK_WIDTH,
 } from '@/game/world/cityLayout';
-import { SUBURBS, getSuburbBounds, sampleSpline } from '@/game/world/suburbs';
+import { sampleSpline } from '@/game/world/suburbs';
+import { SPLINE_REGIONS, getSplineRegionBounds } from '@/game/world/splineRegions';
+import { AIRPORT } from '@/game/world/airport';
 import { useGameStore } from '@/state/gameStore';
 import {
   readDrivenCarPos,
@@ -39,14 +41,14 @@ const CITY_HEIGHT = CITY_DEPTH;
 const MAP_PADDING = 10;
 const MINIMAP_VIEW_MIN = 150;
 const MINIMAP_VIEW_MAX = 310;
-// Widen the map extent to enclose both the grid and any suburbs that sit off
-// its edges. The grid still starts at (0,0) in map coords so existing cell
+// Widen the map extent to enclose the grid plus any off-grid spline regions
+// (suburbs + airport). The grid still starts at (0,0) in map coords so cell
 // drawing keeps its offsets; WORLD_* simply extends the viewport.
-const SUBURB_BOUNDS = getSuburbBounds();
-const WORLD_MIN_X = Math.min(0, SUBURB_BOUNDS.minX - CITY_MIN_X);
-const WORLD_MIN_Y = Math.min(0, SUBURB_BOUNDS.minZ - CITY_MIN_Z);
-const WORLD_MAX_X = Math.max(CITY_WIDTH, SUBURB_BOUNDS.maxX - CITY_MIN_X);
-const WORLD_MAX_Y = Math.max(CITY_HEIGHT, SUBURB_BOUNDS.maxZ - CITY_MIN_Z);
+const REGION_BOUNDS = getSplineRegionBounds();
+const WORLD_MIN_X = Math.min(0, REGION_BOUNDS.minX - CITY_MIN_X);
+const WORLD_MIN_Y = Math.min(0, REGION_BOUNDS.minZ - CITY_MIN_Z);
+const WORLD_MAX_X = Math.max(CITY_WIDTH, REGION_BOUNDS.maxX - CITY_MIN_X);
+const WORLD_MAX_Y = Math.max(CITY_HEIGHT, REGION_BOUNDS.maxZ - CITY_MIN_Z);
 const WORLD_WIDTH = WORLD_MAX_X - WORLD_MIN_X;
 const WORLD_HEIGHT = WORLD_MAX_Y - WORLD_MIN_Y;
 const FULL_VIEW_SIZE = Math.max(WORLD_WIDTH, WORLD_HEIGHT) + MAP_PADDING * 2;
@@ -197,7 +199,7 @@ function RoadMarkings({
 
 function SuburbLayer() {
   const content = useMemo(() => {
-    return SUBURBS.flatMap((s) => {
+    return SPLINE_REGIONS.flatMap((s) => {
       const splinePaths = s.splines.map((spline) => {
         const pts = sampleSpline(spline.controls, SUBURB_SAMPLES)
           .map((sample) => {
@@ -232,6 +234,116 @@ function SuburbLayer() {
       return [...splinePaths, ...junctionDiscs];
     });
   }, []);
+  return <>{content}</>;
+}
+
+function AirportLayer({ showLabels }: { showLabels: boolean }) {
+  const content = useMemo(() => {
+    const out: React.ReactNode[] = [];
+    const rect = (
+      key: string,
+      cx: number,
+      cz: number,
+      w: number,
+      d: number,
+      fill: string,
+    ) => {
+      const p = toMapPos(cx - w / 2, cz - d / 2);
+      out.push(<rect key={key} x={p.x} y={p.y} width={w} height={d} fill={fill} />);
+    };
+    // Pad first (under everything else)
+    {
+      const cx = (AIRPORT.pad.minX + AIRPORT.pad.maxX) / 2;
+      const cz = (AIRPORT.pad.minZ + AIRPORT.pad.maxZ) / 2;
+      const w = AIRPORT.pad.maxX - AIRPORT.pad.minX;
+      const d = AIRPORT.pad.maxZ - AIRPORT.pad.minZ;
+      rect('apt_pad', cx, cz, w, d, '#3f4147');
+    }
+    rect(
+      'apt_apron',
+      AIRPORT.apron.centerX,
+      AIRPORT.apron.centerZ,
+      AIRPORT.apron.width,
+      AIRPORT.apron.depth,
+      '#4a4d54',
+    );
+    rect(
+      'apt_taxi',
+      AIRPORT.taxiway.centerX,
+      AIRPORT.taxiway.centerZ,
+      AIRPORT.taxiway.width,
+      AIRPORT.taxiway.depth,
+      '#26282d',
+    );
+    rect(
+      'apt_runway',
+      AIRPORT.runway.centerX,
+      AIRPORT.runway.centerZ,
+      AIRPORT.runway.width,
+      AIRPORT.runway.depth,
+      '#1f2126',
+    );
+    // Runway centerline (thin yellow stripe).
+    {
+      const p = toMapPos(AIRPORT.runway.centerX, AIRPORT.runway.centerZ - AIRPORT.runway.depth / 2);
+      out.push(
+        <line
+          key="apt_runway_cl"
+          x1={p.x}
+          y1={p.y + 4}
+          x2={p.x}
+          y2={p.y + AIRPORT.runway.depth - 4}
+          stroke="#d8c46a"
+          strokeWidth={1}
+          strokeDasharray="4 4"
+        />,
+      );
+    }
+    rect(
+      'apt_lot',
+      AIRPORT.parkingLot.centerX,
+      AIRPORT.parkingLot.centerZ,
+      AIRPORT.parkingLot.width,
+      AIRPORT.parkingLot.depth,
+      '#555861',
+    );
+    rect(
+      'apt_terminal',
+      AIRPORT.terminal.centerX,
+      AIRPORT.terminal.centerZ,
+      AIRPORT.terminal.width,
+      AIRPORT.terminal.depth,
+      '#cfd2d6',
+    );
+    rect(
+      'apt_tower',
+      AIRPORT.tower.centerX,
+      AIRPORT.tower.centerZ,
+      AIRPORT.tower.width,
+      AIRPORT.tower.depth,
+      '#bfc1c5',
+    );
+    AIRPORT.hangars.forEach((h, i) => {
+      rect(`apt_hangar_${i}`, h.centerX, h.centerZ, h.width, h.depth, '#7c8089');
+    });
+    if (showLabels) {
+      const tp = toMapPos(AIRPORT.terminal.centerX, AIRPORT.terminal.centerZ);
+      out.push(
+        <text
+          key="apt_label"
+          x={tp.x}
+          y={tp.y + 5}
+          textAnchor="middle"
+          fontSize={16}
+          fontWeight={700}
+          fill="#1d2530"
+        >
+          A
+        </text>,
+      );
+    }
+    return out;
+  }, [showLabels]);
   return <>{content}</>;
 }
 
@@ -458,6 +570,7 @@ export default function CityMap({ variant }: CityMapProps) {
           height={WORLD_HEIGHT + MAP_PADDING * 2}
           fill="#293b2d"
         />
+        <AirportLayer showLabels={!isMinimap} />
         <MapCells showLabels={!isMinimap} />
         <SuburbLayer />
         <g

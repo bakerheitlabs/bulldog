@@ -1,4 +1,4 @@
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export type WeaponId = 'handgun' | 'shotgun' | 'smg';
 
@@ -8,6 +8,9 @@ export type WantedState = {
   heat: number;
   lastCrimeAt: number;
 };
+
+export const WEATHER_TYPES = ['sunny', 'cloudy', 'rain', 'storm'] as const;
+export type WeatherType = (typeof WEATHER_TYPES)[number];
 
 export type GameStoreSnapshot = {
   player: {
@@ -29,6 +32,9 @@ export type GameStoreSnapshot = {
     // Seconds since in-game midnight (0..86400). World time runs at 30× real
     // time (1 in-game hour = 2 real minutes), driven by Game.tsx's tick loop.
     seconds: number;
+  };
+  weather: {
+    type: WeatherType;
   };
   meta: {
     startedAt: number;

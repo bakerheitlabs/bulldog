@@ -5,10 +5,12 @@ import Cop from './Cop';
 import PoliceCruiser from './PoliceCruiser';
 import { starsFromHeat, useGameStore } from '@/state/gameStore';
 
-const PED_COUNT = 40;
-const CAR_COUNT = 22;
-const PATROL_COP_COUNT = 6;
-const PATROL_CRUISER_COUNT = 4;
+// Tuned for the 25×25 grid (~3× the area of the original 15×15). Density
+// per block is roughly preserved; tweak down if the larger world is too busy.
+const PED_COUNT = 90;
+const CAR_COUNT = 50;
+const PATROL_COP_COUNT = 12;
+const PATROL_CRUISER_COUNT = 8;
 
 // Additional response foot-cops spawned near the player per wanted star.
 // At 2+ stars, response cruisers stack on top of the patrol cruisers.

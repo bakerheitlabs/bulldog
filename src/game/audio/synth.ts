@@ -220,6 +220,176 @@ export function startCityAmbient(): AmbientHandle | null {
   };
 }
 
+export type RainHandle = {
+  // 0..1 ramps the rain bus gain. Used to push rain louder during a storm.
+  setIntensity: (level: number) => void;
+  stop: () => void;
+};
+
+// Procedural rainfall loop. Three layers fed by long noise buffers:
+// (1) low brown-noise rumble — the broad "wet street" body,
+// (2) bandpass white noise around 2.4 kHz — high-frequency hiss,
+// (3) a slow filter-cutoff LFO on a fourth noise source for swells.
+// Routed through the ambient bus so it ducks with the master volume slider.
+export function startRain(initialIntensity = 0.5): RainHandle | null {
+  resumeIfSuspended();
+  const ctx = getAudioContext();
+  const dest = getAmbientNode();
+  if (!ctx || !dest) return null;
+
+  const out = ctx.createGain();
+  out.gain.value = 0;
+  out.connect(dest);
+
+  // (1) Low-end rumble.
+  const body = ctx.createBufferSource();
+  body.buffer = brownNoiseBuffer(ctx, 4);
+  body.loop = true;
+  const bodyLp = ctx.createBiquadFilter();
+  bodyLp.type = 'lowpass';
+  bodyLp.frequency.value = 320;
+  const bodyGain = ctx.createGain();
+  bodyGain.gain.value = 0.55;
+  body.connect(bodyLp);
+  bodyLp.connect(bodyGain);
+  bodyGain.connect(out);
+  body.start();
+
+  // (2) Hiss.
+  const hiss = ctx.createBufferSource();
+  hiss.buffer = noiseBuffer(ctx, 4);
+  hiss.loop = true;
+  const hissBp = ctx.createBiquadFilter();
+  hissBp.type = 'bandpass';
+  hissBp.frequency.value = 2400;
+  hissBp.Q.value = 0.7;
+  const hissHp = ctx.createBiquadFilter();
+  hissHp.type = 'highpass';
+  hissHp.frequency.value = 1200;
+  const hissGain = ctx.createGain();
+  hissGain.gain.value = 0.32;
+  hiss.connect(hissBp);
+  hissBp.connect(hissHp);
+  hissHp.connect(hissGain);
+  hissGain.connect(out);
+  hiss.start();
+
+  // (3) Swells — a slow LFO opens/closes a lowpass on a third noise layer so
+  // the texture isn't a static wash. LFO at 0.3 Hz, depth ~600 Hz.
+  const swell = ctx.createBufferSource();
+  swell.buffer = noiseBuffer(ctx, 4);
+  swell.loop = true;
+  const swellLp = ctx.createBiquadFilter();
+  swellLp.type = 'lowpass';
+  swellLp.frequency.value = 1400;
+  const swellGain = ctx.createGain();
+  swellGain.gain.value = 0.22;
+  const swellLfo = ctx.createOscillator();
+  swellLfo.type = 'sine';
+  swellLfo.frequency.value = 0.3;
+  const swellLfoGain = ctx.createGain();
+  swellLfoGain.gain.value = 600;
+  swellLfo.connect(swellLfoGain);
+  swellLfoGain.connect(swellLp.frequency);
+  swell.connect(swellLp);
+  swellLp.connect(swellGain);
+  swellGain.connect(out);
+  swell.start();
+  swellLfo.start();
+
+  // Soft fade in so the rain doesn't punch in suddenly when toggled.
+  const setIntensity = (level: number) => {
+    const clamped = Math.max(0, Math.min(1, level));
+    out.gain.cancelScheduledValues(ctx.currentTime);
+    out.gain.setTargetAtTime(0.18 + clamped * 0.32, ctx.currentTime, 0.4);
+  };
+  setIntensity(initialIntensity);
+
+  let stopped = false;
+  return {
+    setIntensity,
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      const now = ctx.currentTime;
+      out.gain.setTargetAtTime(0, now, 0.25);
+      window.setTimeout(() => {
+        try {
+          body.stop();
+          hiss.stop();
+          swell.stop();
+          swellLfo.stop();
+          out.disconnect();
+        } catch {
+          // already stopped
+        }
+      }, 700);
+    },
+  };
+}
+
+// One-shot thunder. Two crackle bursts ride a deep brown-noise rumble whose
+// lowpass cutoff sweeps down so the tail fades into a low rumble. Total
+// duration ~3 s. Routed through the ambient bus.
+export function playThunder() {
+  resumeIfSuspended();
+  const ctx = getAudioContext();
+  const dest = getAmbientNode();
+  if (!ctx || !dest) return;
+
+  const t0 = ctx.currentTime;
+  const totalDuration = 3.2;
+
+  const out = ctx.createGain();
+  out.gain.value = 0.55;
+  out.connect(dest);
+
+  // Rumble — long brown noise with a downward-sweeping lowpass.
+  const rumble = ctx.createBufferSource();
+  rumble.buffer = brownNoiseBuffer(ctx, totalDuration);
+  const rumbleLp = ctx.createBiquadFilter();
+  rumbleLp.type = 'lowpass';
+  rumbleLp.frequency.setValueAtTime(900, t0);
+  rumbleLp.frequency.exponentialRampToValueAtTime(60, t0 + totalDuration);
+  const rumbleGain = ctx.createGain();
+  rumbleGain.gain.setValueAtTime(0.0001, t0);
+  rumbleGain.gain.exponentialRampToValueAtTime(1.6, t0 + 0.06);
+  rumbleGain.gain.exponentialRampToValueAtTime(0.0001, t0 + totalDuration);
+  rumble.connect(rumbleLp);
+  rumbleLp.connect(rumbleGain);
+  rumbleGain.connect(out);
+  rumble.start(t0);
+  rumble.stop(t0 + totalDuration);
+
+  // Crackles — two short noise bursts at random offsets, bandpassed in the
+  // 1.5–4 kHz region for the snap of close lightning.
+  const crackleAt = (offset: number, gainPeak: number) => {
+    const dur = 0.18;
+    const t = t0 + offset;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(ctx, dur);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 2400 + Math.random() * 800;
+    bp.Q.value = 0.8;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gainPeak, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(bp);
+    bp.connect(g);
+    g.connect(out);
+    src.start(t);
+    src.stop(t + dur);
+  };
+  crackleAt(0, 0.9);
+  crackleAt(0.18 + Math.random() * 0.12, 0.55);
+  // Disconnect the master gain after the tail to free the node graph.
+  window.setTimeout(() => {
+    try { out.disconnect(); } catch { /* already gone */ }
+  }, totalDuration * 1000 + 200);
+}
+
 export type EngineHandle = {
   setThrottle: (t: number) => void;
   setSpeed: (s: number) => void;
@@ -382,6 +552,281 @@ export function startEngine(profile: EngineProfile = DEFAULT_ENGINE): EngineHand
           // already stopped
         }
       }, 350);
+    },
+  };
+}
+
+// Turbofan / jet engine. Same EngineHandle shape as the car so callers can
+// swap drivers without restructuring, but the layered model is different.
+//
+// Real jets are dominated by *broadband noise* (exhaust shear, bypass air,
+// combustion roar) with a piercing tonal *turbine whine* sitting on top
+// whose pitch sweeps with N1 fan speed. There is NO sawtooth bass drone —
+// that reads as a piston engine. The iconic "jet spooling up" sound is the
+// whine pitch climbing from a few hundred Hz to a couple kHz as the fan
+// spins up.
+//
+// Layers (all routed into a master lowpass that opens with airspeed):
+//   sub      — low brown-noise rumble, always-on body of the engine
+//   roar     — bandpassed brown noise around the combustion frequencies
+//              (~400 Hz), throttle-emphasized — the "fire in the can"
+//   bypass   — high-bandpass white noise (~4 kHz), throttle-driven —
+//              bypass-fan exhaust shear
+//   whine    — sawtooth at the N1 fundamental, sweeps from ~350 → ~2000 Hz
+//              with throttle. THIS is what makes it sound like a jet.
+//   buzzsaw  — second sawtooth at ~1.5× whine, slightly detuned, gives the
+//              chorused turbine character of a multi-stage compressor.
+export function startAirplaneEngine(): EngineHandle | null {
+  resumeIfSuspended();
+  const ctx = getAudioContext();
+  const dest = getSfxNode();
+  if (!ctx || !dest) return null;
+
+  const out = ctx.createGain();
+  out.gain.value = 0.0001;
+  out.connect(dest);
+
+  // Master lowpass — opens up with speed so the jet brightens at cruise.
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 2800;
+  lp.Q.value = 0.5;
+  lp.connect(out);
+
+  const sum = ctx.createGain();
+  sum.gain.value = 0.6;
+  sum.connect(lp);
+
+  // (1) Sub rumble — low-passed brown noise. Always on, gives the engine mass.
+  const sub = ctx.createBufferSource();
+  sub.buffer = brownNoiseBuffer(ctx, 6);
+  sub.loop = true;
+  const subLp = ctx.createBiquadFilter();
+  subLp.type = 'lowpass';
+  subLp.frequency.value = 140;
+  const subGain = ctx.createGain();
+  subGain.gain.value = 0.7;
+  sub.connect(subLp).connect(subGain).connect(sum);
+
+  // (2) Combustion roar — bandpassed brown noise around 400 Hz. Idle-on but
+  // gets noticeably louder with throttle (more fuel = more roar).
+  const roar = ctx.createBufferSource();
+  roar.buffer = brownNoiseBuffer(ctx, 6);
+  roar.loop = true;
+  const roarBp = ctx.createBiquadFilter();
+  roarBp.type = 'bandpass';
+  roarBp.frequency.value = 420;
+  roarBp.Q.value = 0.8;
+  const roarGain = ctx.createGain();
+  roarGain.gain.value = 0.45; // idle level
+  roar.connect(roarBp).connect(roarGain).connect(sum);
+
+  // (3) Bypass / exhaust hiss — high-bandpassed white noise. Throttle-driven.
+  const bypass = ctx.createBufferSource();
+  bypass.buffer = noiseBuffer(ctx, 6);
+  bypass.loop = true;
+  const bypassHp = ctx.createBiquadFilter();
+  bypassHp.type = 'highpass';
+  bypassHp.frequency.value = 2200;
+  const bypassBp = ctx.createBiquadFilter();
+  bypassBp.type = 'bandpass';
+  bypassBp.frequency.value = 4200;
+  bypassBp.Q.value = 0.7;
+  const bypassGain = ctx.createGain();
+  bypassGain.gain.value = 0.05; // faintly audible at idle, ramps with throttle
+  bypass.connect(bypassHp).connect(bypassBp).connect(bypassGain).connect(sum);
+
+  // (4) Turbine whine — the iconic tonal layer. Sawtooth, narrow bandpass to
+  // get a "singing" quality rather than a buzz. Pitch is set by setThrottle:
+  // we slew the oscillator frequency from idle (~350 Hz) to peak (~2000 Hz)
+  // so the player hears a clear spool-up when they push W.
+  const whineIdleHz = 350;
+  const whinePeakHz = 2000;
+  const whine = ctx.createOscillator();
+  whine.type = 'sawtooth';
+  whine.frequency.value = whineIdleHz;
+  const whineBp = ctx.createBiquadFilter();
+  whineBp.type = 'bandpass';
+  whineBp.frequency.value = whineIdleHz;
+  whineBp.Q.value = 6;
+  const whineGain = ctx.createGain();
+  whineGain.gain.value = 0.04; // audible-but-quiet whistle at idle
+  whine.connect(whineBp).connect(whineGain).connect(sum);
+
+  // (5) Buzzsaw harmonic — second sawtooth at 1.5× the whine, slightly
+  // detuned. Two compressor stages don't perfectly track each other; this is
+  // what makes it sound like a real multi-stage turbofan rather than a
+  // single sine.
+  const buzzRatio = 1.51; // intentionally not 1.5 exactly
+  const buzz = ctx.createOscillator();
+  buzz.type = 'sawtooth';
+  buzz.frequency.value = whineIdleHz * buzzRatio;
+  const buzzBp = ctx.createBiquadFilter();
+  buzzBp.type = 'bandpass';
+  buzzBp.frequency.value = whineIdleHz * buzzRatio;
+  buzzBp.Q.value = 5;
+  const buzzGain = ctx.createGain();
+  buzzGain.gain.value = 0.025;
+  buzz.connect(buzzBp).connect(buzzGain).connect(sum);
+
+  sub.start();
+  roar.start();
+  bypass.start();
+  whine.start();
+  buzz.start();
+
+  // Fade in to idle so the engine doesn't punch in.
+  const idleLevel = 0.10;
+  const peakBoost = 0.18;
+  out.gain.setTargetAtTime(idleLevel, ctx.currentTime, 0.3);
+
+  // Track current throttle so setSpeed can apply a small extra pitch nudge
+  // on top of the throttle-driven sweep without fighting it.
+  let curThrottle = 0;
+  let curSpeed = 0;
+  const applyWhinePitch = () => {
+    if (!ctx) return;
+    // Throttle does most of the work (the spool-up). Speed adds a small
+    // additional climb so cruise vs. spool-at-idle still sound different.
+    const t = curThrottle;
+    const s = curSpeed;
+    const hz = whineIdleHz + (whinePeakHz - whineIdleHz) * t * (1 + s * 0.18);
+    const now = ctx.currentTime;
+    // Slew slowly enough that you hear the sweep, not a step.
+    whine.frequency.setTargetAtTime(hz, now, 0.35);
+    whineBp.frequency.setTargetAtTime(hz, now, 0.35);
+    buzz.frequency.setTargetAtTime(hz * buzzRatio, now, 0.35);
+    buzzBp.frequency.setTargetAtTime(hz * buzzRatio, now, 0.35);
+  };
+
+  let stopped = false;
+  return {
+    setThrottle: (t: number) => {
+      if (stopped || !ctx) return;
+      curThrottle = t;
+      const now = ctx.currentTime;
+      // Master swells with throttle so full power is genuinely louder.
+      out.gain.setTargetAtTime(idleLevel + t * peakBoost, now, 0.3);
+      // Combustion roar gets stronger.
+      roarGain.gain.setTargetAtTime(0.45 + t * 0.55, now, 0.3);
+      // Bypass shear is the main "whoosh" you hear from the wing — climbs
+      // hard with throttle so the acceleration is audible.
+      bypassGain.gain.setTargetAtTime(0.05 + t * 0.5, now, 0.3);
+      // Whine + buzzsaw level grow with throttle on top of the pitch sweep.
+      whineGain.gain.setTargetAtTime(0.04 + t * 0.10, now, 0.3);
+      buzzGain.gain.setTargetAtTime(0.025 + t * 0.06, now, 0.3);
+      applyWhinePitch();
+    },
+    setSpeed: (s: number) => {
+      if (stopped || !ctx) return;
+      curSpeed = s;
+      const now = ctx.currentTime;
+      // Lowpass opens with airspeed so the jet brightens at cruise.
+      lp.frequency.setTargetAtTime(2800 + s * 3500, now, 0.4);
+      applyWhinePitch();
+    },
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      const now = ctx.currentTime;
+      out.gain.setTargetAtTime(0, now, 0.2);
+      window.setTimeout(() => {
+        try {
+          sub.stop();
+          roar.stop();
+          bypass.stop();
+          whine.stop();
+          buzz.stop();
+          out.disconnect();
+        } catch {
+          // already stopped
+        }
+      }, 600);
+    },
+  };
+}
+
+export type CockpitWarningHandle = { stop: () => void };
+
+// Continuous cockpit alarm warble. Square-wave carrier whose frequency
+// alternates between two pitches every ~140 ms, with no silence between —
+// the iconic "EEE-AHH-EEE-AHH" emergency siren you'd hear in a cockpit
+// master-warning condition. Routed through a lowpass to take the harshness
+// off the square's high harmonics, and a bandpass to give it the cutting
+// midrange of a real alarm horn.
+//
+// Implementation mirrors startSiren: rather than fire a setInterval that
+// does setValueAtTime (which would drift relative to the audio clock), we
+// schedule a few seconds of frequency switches ahead on the AudioParam and
+// top up the schedule on a JS interval.
+export function startCockpitWarning(): CockpitWarningHandle | null {
+  resumeIfSuspended();
+  const ctx = getAudioContext();
+  const dest = getSfxNode();
+  if (!ctx || !dest) return null;
+
+  const out = ctx.createGain();
+  out.gain.value = 0.0001;
+  out.connect(dest);
+
+  // Square through a bandpass + lowpass: the bandpass picks out the urgent
+  // midrange; the lowpass tames the very-high partials so it cuts without
+  // being painful.
+  const osc = ctx.createOscillator();
+  osc.type = 'square';
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 1100;
+  bp.Q.value = 1.4;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 3500;
+  lp.Q.value = 0.7;
+  osc.connect(bp).connect(lp).connect(out);
+
+  // Two alternating tones — a perfect-fourth apart for that classic
+  // "siren" interval. setValueAtTime steps the frequency cleanly between
+  // them with no glide, which is what makes the warble read as an alarm
+  // instead of a sweep.
+  const FREQ_HI = 1100;
+  const FREQ_LO = 825;
+  const HALF_PERIOD = 0.14; // seconds per tone — ~3.5 Hz alternation
+
+  const t0 = ctx.currentTime;
+  let scheduledTo = t0;
+  let nextHigh = true;
+  const lookahead = 4;
+
+  const scheduleSteps = () => {
+    const target = ctx.currentTime + lookahead;
+    while (scheduledTo < target) {
+      osc.frequency.setValueAtTime(nextHigh ? FREQ_HI : FREQ_LO, scheduledTo);
+      nextHigh = !nextHigh;
+      scheduledTo += HALF_PERIOD;
+    }
+  };
+  osc.frequency.setValueAtTime(FREQ_HI, t0);
+  scheduleSteps();
+  const interval = window.setInterval(scheduleSteps, 1500);
+
+  osc.start(t0);
+  out.gain.setTargetAtTime(0.45, t0, 0.03);
+
+  let stopped = false;
+  return {
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      window.clearInterval(interval);
+      const now = ctx.currentTime;
+      out.gain.cancelScheduledValues(now);
+      out.gain.setTargetAtTime(0, now, 0.04);
+      window.setTimeout(() => {
+        try {
+          osc.stop();
+          out.disconnect();
+        } catch { /* already gone */ }
+      }, 200);
     },
   };
 }

@@ -4,12 +4,16 @@ import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useGameStore } from '@/state/gameStore';
 import { getHospitalRespawn, getPlayerSpawn } from '@/game/world/cityLayout';
+import { consumeTeleport, peekTeleport } from '@/game/world/teleport';
 import { playFootstep } from '@/game/audio/synth';
 import {
   useVehicleStore,
   readDrivenCarPos,
   readDrivenCarYaw,
+  readDrivenPlanePos,
+  readDrivenPlaneYaw,
   clearDrivenCarPose,
+  clearDrivenPlanePose,
 } from '@/game/vehicles/vehicleState';
 import { cameraState } from './cameraState';
 import { useKeyboard } from './useKeyboard';
@@ -38,7 +42,10 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
   const stepAccum = useRef(0);
   const lastPos = useRef<{ x: number; z: number } | null>(null);
   const drivenCarId = useVehicleStore((s) => s.drivenCarId);
+  const drivenPlaneId = useVehicleStore((s) => s.drivenPlaneId);
+  const inVehicle = drivenCarId != null || drivenPlaneId != null;
   const wasDriving = useRef(false);
+  const wasFlying = useRef(false);
   const equipped = useGameStore((s) => s.inventory.equipped);
   const [action, setAction] = useState<CharacterAction>('idle');
   const actionRef = useRef<CharacterAction>('idle');
@@ -89,6 +96,37 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
     }
   }, [drivenCarId]);
 
+  // Same body-stash / place-alongside lifecycle, but for the airplane. Plane
+  // exits drop the player further out so they don't spawn inside the wing.
+  // Falls back to the plane's exact xz at GROUND_Y when there's no pose
+  // yet (eg. exit fired the same frame as enter).
+  useEffect(() => {
+    const r = rigid.current;
+    if (!r) return;
+    if (drivenPlaneId) {
+      r.setBodyType(2, true);
+      r.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      r.setTranslation({ x: 0, y: -100, z: 0 }, true);
+      wasFlying.current = true;
+    } else if (wasFlying.current) {
+      const planePos = readDrivenPlanePos();
+      const yaw = readDrivenPlaneYaw();
+      if (planePos) {
+        // Plane fuselage is ~6m wide; exit 7m out so player clears the wing.
+        const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+        const ox = planePos.x + side.x * 7;
+        const oz = planePos.z + side.z * 7;
+        // Snap player to ground level (y=1.2) regardless of plane altitude.
+        // No mid-air bailout — exiting at altitude lands you under the plane.
+        r.setTranslation({ x: ox, y: 1.2, z: oz }, true);
+      }
+      r.setBodyType(0, true);
+      r.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      wasFlying.current = false;
+      clearDrivenPlanePose();
+    }
+  }, [drivenPlaneId]);
+
   const setRigid = useCallback(
     (instance: RapierRigidBody | null) => {
       rigid.current = instance;
@@ -126,6 +164,34 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
 
   useFrame(() => {
     if (!rigid.current) return;
+    // Dev-console teleport. If we're in a vehicle, fire its exit first and
+    // bail this frame so the vehicle's own exit-effect can place the body
+    // back under our control before we override the position. The signal
+    // stays pending across frames until the player is on foot.
+    const tp = peekTeleport();
+    if (tp) {
+      if (drivenCarId || drivenPlaneId) {
+        const vs = useVehicleStore.getState();
+        if (drivenCarId) vs.exitCar();
+        if (drivenPlaneId) vs.exitPlane();
+        return;
+      }
+      consumeTeleport();
+      const r = rigid.current;
+      r.setBodyType(0, true); // ensure dynamic
+      r.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      r.setTranslation({ x: tp[0], y: tp[1], z: tp[2] }, true);
+      setPlayerTransform([tp[0], tp[1], tp[2]], 0);
+      return;
+    }
+    if (drivenPlaneId) {
+      // Keep gameStore.player.position tracking the plane so NPC targeting,
+      // line-of-sight, and chunk streaming all follow the pilot.
+      const planePos = readDrivenPlanePos();
+      const planeYaw = readDrivenPlaneYaw();
+      if (planePos) setPlayerTransform([planePos.x, planePos.y, planePos.z], planeYaw);
+      return;
+    }
     if (drivenCarId) {
       // Keep gameStore.player.position tracking the car so NPC targeting,
       // line-of-sight, and chunk streaming all follow the driver.
@@ -218,7 +284,7 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
       userData={PLAYER_USER_DATA}
     >
       <CapsuleCollider args={[0.5, 0.4]} />
-      <group ref={meshRef} visible={!drivenCarId}>
+      <group ref={meshRef} visible={!inVehicle}>
         <GltfBoundary
           fallback={
             <group>

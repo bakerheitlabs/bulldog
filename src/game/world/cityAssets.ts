@@ -15,6 +15,7 @@ export const MODEL_PATHS = {
   carSedan: '/models/cars/car_sedan.glb',
   carSedanSports: '/models/cars/car_sedan_sports.glb',
   carHatchbackSports: '/models/cars/car_hatchback_sports.glb',
+  carSportsCoupe: '/models/cars/car_apex_rush.glb',
   carSuv: '/models/cars/car_suv.glb',
   carSuvLuxury: '/models/cars/car_suv_luxury.glb',
   carTaxi: '/models/cars/car_taxi.glb',
@@ -32,6 +33,7 @@ export const MODEL_PATHS = {
   characterFemaleF: '/models/characters/character_female_f.glb',
   weaponPistol: '/models/weapons/Pistol.glb',
   weaponSmg: '/models/weapons/Submachine Gun.glb',
+  airplane1: '/models/airplanes/airplane_1.glb',
 } as const;
 
 export type ModelKey = keyof typeof MODEL_PATHS;
@@ -40,6 +42,7 @@ export const CAR_VARIANTS = [
   'carSedan',
   'carSedanSports',
   'carHatchbackSports',
+  'carSportsCoupe',
   'carSuv',
   'carSuvLuxury',
   'carTaxi',
@@ -125,6 +128,25 @@ export const VEHICLE_IDENTITY: Record<VehicleIdentityKey, VehicleIdentity> = {
       lfoBaseHz: 12,
       lfoSpeedRange: 20,
       lfoDepth: 0.22,
+    },
+  },
+  carSportsCoupe: {
+    brand: 'Apex',
+    model: 'Rush',
+    topSpeed: 36,
+    engine: {
+      bassFreq: 48,
+      rpmRange: 1.55,
+      masterIdle: 0.08,
+      masterPeak: 0.16,
+      highGainMax: 0.36,
+      noiseGainMax: 0.20,
+      filterBaseHz: 480,
+      filterOpenRange: 1800,
+      filterQPeak: 1.9,
+      lfoBaseHz: 11,
+      lfoSpeedRange: 22,
+      lfoDepth: 0.30,
     },
   },
   carSuv: {

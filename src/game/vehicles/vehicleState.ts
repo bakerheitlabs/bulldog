@@ -8,6 +8,11 @@ export type EnteredBanner = { brand: string; model: string; at: number };
 
 type VehicleState = {
   drivenCarId: string | null;
+  // Cars and planes use the same enter/exit ergonomics (E key, single-vehicle
+  // restriction) but their physics/HUD diverge. They live in the same store
+  // so mutual exclusion (entering a plane auto-exits the car, and vice versa)
+  // can be expressed as a single setter without cross-store coordination.
+  drivenPlaneId: string | null;
   carColors: Record<string, string>;
   carDamage: Record<string, number>;
   // Per-vehicle police-siren on/off. Drives flashing lights (always) and the
@@ -17,6 +22,8 @@ type VehicleState = {
   lastEnteredBanner: EnteredBanner | null;
   enterCar: (id: string) => void;
   exitCar: () => void;
+  enterPlane: (id: string) => void;
+  exitPlane: () => void;
   setCarColor: (id: string, color: string) => void;
   damageCarBy: (id: string, amount: number) => void;
   resetCarDamage: (id: string) => void;
@@ -27,12 +34,15 @@ type VehicleState = {
 
 export const useVehicleStore = create<VehicleState>((set) => ({
   drivenCarId: null,
+  drivenPlaneId: null,
   carColors: {},
   carDamage: {},
   sirenActive: {},
   lastEnteredBanner: null,
-  enterCar: (id) => set({ drivenCarId: id }),
+  enterCar: (id) => set({ drivenCarId: id, drivenPlaneId: null }),
   exitCar: () => set({ drivenCarId: null }),
+  enterPlane: (id) => set({ drivenPlaneId: id, drivenCarId: null }),
+  exitPlane: () => set({ drivenPlaneId: null }),
   setCarColor: (id, color) =>
     set((s) => ({ carColors: { ...s.carColors, [id]: color } })),
   damageCarBy: (id, amount) =>
@@ -85,4 +95,46 @@ export function readDrivenCarPos(): THREE.Vector3 | null {
 
 export function readDrivenCarYaw(): number {
   return _drivenYaw;
+}
+
+// Module-level pose mirror for the currently flown airplane. Planes have an
+// extra two angular DOFs (pitch + roll) on top of yaw, so we keep a separate
+// mirror rather than overloading the car one.
+const _drivenPlanePos = new THREE.Vector3();
+let _hasDrivenPlanePos = false;
+let _drivenPlaneYaw = 0;
+let _drivenPlanePitch = 0;
+let _drivenPlaneRoll = 0;
+
+export function writeDrivenPlanePose(
+  pos: THREE.Vector3,
+  yaw: number,
+  pitch: number,
+  roll: number,
+) {
+  _drivenPlanePos.copy(pos);
+  _drivenPlaneYaw = yaw;
+  _drivenPlanePitch = pitch;
+  _drivenPlaneRoll = roll;
+  _hasDrivenPlanePos = true;
+}
+
+export function clearDrivenPlanePose() {
+  _hasDrivenPlanePos = false;
+}
+
+export function readDrivenPlanePos(): THREE.Vector3 | null {
+  return _hasDrivenPlanePos ? _drivenPlanePos : null;
+}
+
+export function readDrivenPlaneYaw(): number {
+  return _drivenPlaneYaw;
+}
+
+export function readDrivenPlanePitch(): number {
+  return _drivenPlanePitch;
+}
+
+export function readDrivenPlaneRoll(): number {
+  return _drivenPlaneRoll;
 }

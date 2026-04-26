@@ -6,7 +6,12 @@ import {
   subscribePrompt,
   type InteractionPrompt,
 } from '@/game/interactions/interactionState';
-import { readDrivenCarPos, useVehicleStore } from '@/game/vehicles/vehicleState';
+import {
+  readDrivenCarPos,
+  readDrivenPlanePos,
+  useVehicleStore,
+} from '@/game/vehicles/vehicleState';
+import { GROUND_Y } from '@/game/airplanes/airplaneConstants';
 import { useSettingsStore } from '@/state/settingsStore';
 import { tokens } from '@/ui/tokens';
 import CityMap from './CityMap';
@@ -130,35 +135,54 @@ function formatClock(seconds: number): { time: string; suffix: string } {
   return { time: `${h12}:${m.toString().padStart(2, '0')}`, suffix };
 }
 
-function ClockReadout({ seconds }: { seconds: number }) {
+const WEATHER_LABELS: Record<string, string> = {
+  sunny: 'CLEAR',
+  cloudy: 'CLOUDY',
+  rain: 'RAIN',
+  storm: 'STORM',
+};
+
+function ClockReadout({ seconds, weather }: { seconds: number; weather: string }) {
   const { time, suffix } = formatClock(seconds);
+  const label = WEATHER_LABELS[weather] ?? weather.toUpperCase();
   return (
     <div
       style={{
         ...panelBase,
         padding: '6px 12px',
-        display: 'inline-flex',
-        alignItems: 'baseline',
-        justifyContent: 'flex-end',
-        gap: 6,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-end',
+        gap: 2,
         fontFamily: tokens.font.mono,
         width: 240,
         boxSizing: 'border-box',
       }}
     >
+      <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
+        <span
+          style={{
+            color: tokens.color.text,
+            fontSize: 18,
+            fontWeight: 700,
+            fontVariantNumeric: 'tabular-nums',
+            letterSpacing: 0.5,
+          }}
+        >
+          {time}
+        </span>
+        <span style={{ color: tokens.color.textMuted, fontSize: 12, letterSpacing: 1.4 }}>
+          {suffix}
+        </span>
+      </div>
       <span
         style={{
-          color: tokens.color.text,
-          fontSize: 18,
-          fontWeight: 700,
-          fontVariantNumeric: 'tabular-nums',
-          letterSpacing: 0.5,
+          color: tokens.color.textMuted,
+          fontSize: 9,
+          letterSpacing: 1.6,
         }}
       >
-        {time}
-      </span>
-      <span style={{ color: tokens.color.textMuted, fontSize: 12, letterSpacing: 1.4 }}>
-        {suffix}
+        {label}
       </span>
     </div>
   );
@@ -322,39 +346,56 @@ export default function HUD() {
   const heat = useGameStore((s) => s.wanted.heat);
   const stars = starsFromHeat(heat);
   const worldSeconds = useGameStore((s) => s.time.seconds);
+  const weather = useGameStore((s) => s.weather.type);
   const [prompt, setPromptState] = useState<InteractionPrompt | null>(getPrompt());
   const drivenCarId = useVehicleStore((s) => s.drivenCarId);
+  const drivenPlaneId = useVehicleStore((s) => s.drivenPlaneId);
   const speedUnit = useSettingsStore((s) => s.speedUnit);
   const [speedMps, setSpeedMps] = useState(0);
-  const lastCarPos = useRef<{ x: number; z: number; t: number } | null>(null);
+  const [altitudeM, setAltitudeM] = useState(0);
+  const lastVehiclePos = useRef<{ x: number; y: number; z: number; t: number } | null>(null);
 
   useEffect(() => subscribePrompt(() => setPromptState(getPrompt())), []);
 
   useEffect(() => {
-    if (!drivenCarId) {
-      lastCarPos.current = null;
+    const inVehicle = drivenCarId != null || drivenPlaneId != null;
+    if (!inVehicle) {
+      lastVehiclePos.current = null;
       setSpeedMps(0);
+      setAltitudeM(0);
       return;
     }
     let raf = 0;
+    const readPose = () => (drivenPlaneId ? readDrivenPlanePos() : readDrivenCarPos());
     const tick = () => {
-      const p = readDrivenCarPos();
+      const p = readPose();
       const now = performance.now();
       if (p) {
-        if (lastCarPos.current) {
-          const dx = p.x - lastCarPos.current.x;
-          const dz = p.z - lastCarPos.current.z;
-          const dt = Math.max(1, now - lastCarPos.current.t) / 1000;
-          const mps = Math.hypot(dx, dz) / dt;
+        if (lastVehiclePos.current) {
+          const dx = p.x - lastVehiclePos.current.x;
+          const dy = p.y - lastVehiclePos.current.y;
+          const dz = p.z - lastVehiclePos.current.z;
+          const dt = Math.max(1, now - lastVehiclePos.current.t) / 1000;
+          // For planes, factor altitude change into the speed reading so the
+          // speedo doesn't flatline during a vertical climb. Cars stay 2D.
+          const mps = drivenPlaneId
+            ? Math.hypot(dx, dy, dz) / dt
+            : Math.hypot(dx, dz) / dt;
           setSpeedMps((prev) => prev * 0.7 + mps * 0.3);
         }
-        lastCarPos.current = { x: p.x, z: p.z, t: now };
+        lastVehiclePos.current = { x: p.x, y: p.y, z: p.z, t: now };
+        if (drivenPlaneId) {
+          // Altitude above the airport ground reference; clamp to zero on
+          // the runway so noise around GROUND_Y doesn't show "1m" while
+          // sitting still.
+          setAltitudeM(Math.max(0, p.y - GROUND_Y));
+        }
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [drivenCarId]);
+  }, [drivenCarId, drivenPlaneId]);
 
   // Display conversion. m/s × 2.237 = mph; m/s × 3.6 = km/h. Source of truth
   // stays in m/s so flipping the setting is instant with no state migration.
@@ -423,7 +464,7 @@ export default function HUD() {
         {stars > 0 && <WantedStars stars={stars} />}
         <HealthPanel hp={player.health} />
         <MoneyReadout money={player.money} />
-        <ClockReadout seconds={worldSeconds} />
+        <ClockReadout seconds={worldSeconds} weather={weather} />
       </div>
 
       {/* top-left: minimap */}
@@ -431,9 +472,49 @@ export default function HUD() {
         <CityMap variant="minimap" />
       </div>
 
-      {/* bottom-right: weapon/ammo OR speedometer */}
+      {/* bottom-right: weapon/ammo OR speedometer (+ altimeter when flying) */}
       <div style={{ position: 'absolute', bottom: 18, right: 18 }}>
-        {drivenCarId ? (
+        {drivenPlaneId ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+            <StatusPanel
+              label="Airspeed"
+              primary={
+                <>
+                  {Math.round(speedDisplay)}
+                  <span
+                    style={{
+                      color: tokens.color.textMuted,
+                      fontSize: 13,
+                      marginLeft: 6,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {speedUnitLabel}
+                  </span>
+                </>
+              }
+              secondary={altitudeM < 1 ? 'GROUND' : 'AIRBORNE'}
+            />
+            <StatusPanel
+              label="Altitude"
+              primary={
+                <>
+                  {Math.round(altitudeM)}
+                  <span
+                    style={{
+                      color: tokens.color.textMuted,
+                      fontSize: 13,
+                      marginLeft: 6,
+                      fontWeight: 500,
+                    }}
+                  >
+                    m
+                  </span>
+                </>
+              }
+            />
+          </div>
+        ) : drivenCarId ? (
           <StatusPanel
             label="Speed"
             primary={

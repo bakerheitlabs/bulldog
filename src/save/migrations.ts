@@ -21,6 +21,16 @@ const MIGRATIONS: Record<number, Migration> = {
       time: { seconds: 8 * 3600 },
     },
   }),
+  3: (raw) => ({
+    ...raw,
+    version: 4,
+    game: {
+      ...raw.game,
+      // Default loaded saves to clear weather; players can switch via the
+      // dev console or future weather-control UI.
+      weather: { type: 'sunny' },
+    },
+  }),
 };
 
 export function migrate(raw: any): SaveData {

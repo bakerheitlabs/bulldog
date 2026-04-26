@@ -97,12 +97,13 @@ export function trimForAnchor(anchor: SplineAnchor, suburb: Suburb): number {
   return inner > 0 ? Math.sqrt(inner) : 0;
 }
 
-// The one hand-authored suburb (v1). Sits east of the city grid off the outer
-// arterial at col=13, row=13 — an S-curved collector leads to a Y-junction
-// with two branches ending in cul-de-sacs.
+// The one hand-authored suburb (v1). Sits east of the city grid off the
+// row-13 arterial — an S-curved collector leads to a Y-junction with two
+// branches ending in cul-de-sacs. Anchored at the east edge of cell [24,13]
+// so the spline emerges directly past the city's east boundary.
 function buildEastSuburb(): Suburb {
-  const [ax, , az] = cellCenter(14, 13);
-  const { width: cellW } = cellSize(14, 13);
+  const [ax, , az] = cellCenter(24, 13);
+  const { width: cellW } = cellSize(24, 13);
   // Anchor the entry at the east edge of the arterial's cell so the spline
   // continues directly from the grid asphalt. The first two controls are
   // collinear along +X so the spline's initial tangent matches the arterial's

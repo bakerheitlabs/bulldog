@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useGameStore } from '@/state/gameStore';
 import { WEAPONS } from '@/game/weapons/weapons';
-import type { WeaponId } from '@/save/schema';
+import { WEATHER_TYPES, type WeaponId, type WeatherType } from '@/save/schema';
 import { nearestLaneWaypoints } from '@/game/world/cityLayout';
+import {
+  TELEPORT_DESTINATIONS,
+  isTeleportDestination,
+  requestTeleport,
+  resolveDestination,
+} from '@/game/world/teleport';
 import { useDebugTrafficStore } from '@/game/npcs/debugTrafficState';
 import { tokens } from '@/ui/tokens';
 
@@ -14,11 +20,17 @@ const HELP = [
   'godmode             toggle unlimited health + ammo',
   'wanted 0-5          set wanted stars',
   'time HH:MM          set world clock (24-hour)',
+  'weather <type>      sunny | cloudy | rain | storm',
   'traffic spawn [N]   spawn N debug AI cars near you (default 1, max 8)',
   'traffic clear       remove all debug AI cars',
+  `teleport <dest>     teleport to: ${TELEPORT_DESTINATIONS.join(' | ')}`,
   'help                show this list',
   'clear               clear console output',
 ];
+
+function isWeatherType(s: string): s is WeatherType {
+  return (WEATHER_TYPES as readonly string[]).includes(s);
+}
 
 function parseClock(s: string | undefined): number | null {
   if (!s) return null;
@@ -90,6 +102,16 @@ function runCommand(raw: string): Line[] {
       const mm = Math.floor((sec % 3600) / 60).toString().padStart(2, '0');
       return [{ kind: 'ok', text: `time → ${hh}:${mm}` }];
     }
+    case 'weather': {
+      const w = args[0]?.toLowerCase();
+      if (!w || !isWeatherType(w)) {
+        return [
+          { kind: 'err', text: `usage: weather <${WEATHER_TYPES.join('|')}>` },
+        ];
+      }
+      state.setWeather(w);
+      return [{ kind: 'ok', text: `weather → ${w}` }];
+    }
     case 'traffic': {
       const sub = args[0]?.toLowerCase();
       const traffic = useDebugTrafficStore.getState();
@@ -122,6 +144,29 @@ function runCommand(raw: string): Line[] {
         ];
       }
       return [{ kind: 'err', text: 'usage: traffic spawn [N] | traffic clear' }];
+    }
+    case 'tp':
+    case 'teleport': {
+      const dest = args[0]?.toLowerCase();
+      if (!dest || !isTeleportDestination(dest)) {
+        return [
+          {
+            kind: 'err',
+            text: `usage: teleport <${TELEPORT_DESTINATIONS.join('|')}>`,
+          },
+        ];
+      }
+      const pos = resolveDestination(dest);
+      if (!pos) {
+        return [{ kind: 'err', text: `couldn't resolve "${dest}" — landmark missing from grid?` }];
+      }
+      requestTeleport(pos);
+      return [
+        {
+          kind: 'ok',
+          text: `teleporting to ${dest} (${pos[0].toFixed(0)}, ${pos[2].toFixed(0)})`,
+        },
+      ];
     }
     case 'clear':
       return [];

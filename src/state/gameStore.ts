@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { WEAPONS } from '@/game/weapons/weapons';
-import type { GameStoreSnapshot, WeaponId } from '@/save/schema';
+import type { GameStoreSnapshot, WeaponId, WeatherType } from '@/save/schema';
 
 const PLAYER_START_POS: [number, number, number] = [0, 1, 0];
 const STARTING_MONEY = 1500;
@@ -25,6 +25,7 @@ type GameState = GameStoreSnapshot & {
   tickWanted: (deltaMs: number) => void;
   tickWorldTime: (deltaMs: number) => void;
   setWorldTimeSeconds: (seconds: number) => void;
+  setWeather: (type: WeatherType) => void;
   setGodMode: (on: boolean) => void;
   setHealth: (hp: number) => void;
   setAmmoReserve: (id: WeaponId, reserve: number) => void;
@@ -68,6 +69,7 @@ function initialSnapshot(): GameStoreSnapshot {
     world: { destroyedTargets: [] },
     wanted: { heat: 0, lastCrimeAt: 0 },
     time: { seconds: WORLD_TIME_START },
+    weather: { type: 'sunny' },
     meta: { startedAt: Date.now(), playtimeMs: 0 },
   };
 }
@@ -90,6 +92,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       world: { destroyedTargets: [...s.world.destroyedTargets] },
       wanted: { ...s.wanted },
       time: { ...s.time },
+      weather: { ...s.weather },
       meta: { ...s.meta },
     };
   },
@@ -179,6 +182,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     })),
   setWorldTimeSeconds: (seconds) =>
     set(() => ({ time: { seconds: wrapSeconds(seconds) } })),
+  setWeather: (type) => set({ weather: { type } }),
   setGodMode: (on) => set({ godMode: on }),
   setHealth: (hp) =>
     set((s) => ({ player: { ...s.player, health: Math.max(0, Math.min(100, Math.round(hp))) } })),

@@ -2,8 +2,10 @@ import { useEffect } from 'react';
 import { useGameStore } from '@/state/gameStore';
 import { useVehicleStore } from './vehicleState';
 import { findNearestVehicle } from './vehicleRegistry';
+import { findNearestAirplane } from '@/game/airplanes/airplaneRegistry';
+import { ENTER_RANGE as PLANE_ENTER_RANGE } from '@/game/airplanes/airplaneConstants';
 
-const ENTER_RANGE = 3.5;
+const CAR_ENTER_RANGE = 3.5;
 
 // Vehicles deliberately don't surface an interaction prompt — entering and
 // exiting is invisible muscle memory once the player knows the key. Instead
@@ -16,17 +18,28 @@ export function useVehicleInteraction(enabled: boolean) {
       if (e.code !== 'KeyE') return;
       const active = document.activeElement as HTMLElement | null;
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
-      const { drivenCarId, enterCar, exitCar } = useVehicleStore.getState();
+      const { drivenCarId, drivenPlaneId, enterCar, exitCar, enterPlane, exitPlane } =
+        useVehicleStore.getState();
       if (drivenCarId) {
         exitCar();
         return;
       }
+      if (drivenPlaneId) {
+        exitPlane();
+        return;
+      }
       const player = useGameStore.getState().player.position;
-      const nearest = findNearestVehicle(
-        { x: player[0], z: player[2] },
-        ENTER_RANGE,
-      );
-      if (nearest) enterCar(nearest.entry.id);
+      const playerXZ = { x: player[0], z: player[2] };
+      // Prefer the closer of the two — if you walk between a parked car and
+      // an airplane, whichever you're physically nearer to wins. Planes have
+      // a wider entry radius (8m vs 3.5m) because their fuselages are huge.
+      const nearestCar = findNearestVehicle(playerXZ, CAR_ENTER_RANGE);
+      const nearestPlane = findNearestAirplane(playerXZ, PLANE_ENTER_RANGE);
+      if (nearestPlane && (!nearestCar || nearestPlane.dist < nearestCar.dist)) {
+        enterPlane(nearestPlane.entry.id);
+        return;
+      }
+      if (nearestCar) enterCar(nearestCar.entry.id);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
