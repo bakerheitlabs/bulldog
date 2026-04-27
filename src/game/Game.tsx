@@ -167,14 +167,18 @@ export default function Game({
 
   return (
     <Canvas
-      shadows
+      shadows={{ type: THREE.PCFSoftShadowMap }}
       camera={{ position: [0, 5, 10], fov: 70, near: 0.1, far: 3500 }}
       // Roads, sidewalks, and lane stripes are stacked at Y=0/0.01/0.02 to
       // imply layering. With a 0.1→1500 frustum the standard z-buffer can't
       // resolve a 1cm gap at 100m+ camera distance, so the stripes flicker
       // when flying high. Logarithmic depth gives near-uniform precision
       // across the full range and fixes this universally for ~free.
-      gl={{ logarithmicDepthBuffer: true }}
+      gl={{ logarithmicDepthBuffer: true, antialias: true }}
+      onCreated={({ gl }) => {
+        gl.toneMapping = THREE.ACESFilmicToneMapping;
+        gl.toneMappingExposure = 1.0;
+      }}
       style={{ position: 'absolute', inset: 0 }}
     >
       <Suspense fallback={null}>

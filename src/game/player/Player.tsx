@@ -121,8 +121,6 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
   // Edge-detect Space so holding it doesn't repeatedly fire jumps the moment
   // the player lands.
   const jumpHeldRef = useRef(false);
-  // Debug: throttle the per-frame position log so the console isn't flooded.
-  const lastDebugLogRef = useRef(0);
 
   useEffect(() => {
     if (paused) return;
@@ -435,26 +433,6 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
     const t = rigid.current.translation();
     setPlayerTransform([t.x, t.y, t.z], yaw);
     setLocalYaw(yaw);
-
-    // DEBUG: ~4Hz dump. New fields: input vector + full linvel so we can see
-    // whether the slope is blocking forward motion even when W is pressed.
-    if (state.clock.elapsedTime - lastDebugLogRef.current > 0.25) {
-      lastDebugLogRef.current = state.clock.elapsedTime;
-      const lv = rigid.current.linvel();
-      console.log('[player]', {
-        pos: { x: +t.x.toFixed(2), y: +t.y.toFixed(3), z: +t.z.toFixed(2) },
-        linvel: {
-          x: +lv.x.toFixed(2),
-          y: +lv.y.toFixed(3),
-          z: +lv.z.toFixed(2),
-        },
-        input: { f: forward, b: back, l: left, r: right },
-        dir: { x: +dir.x.toFixed(2), z: +dir.z.toFixed(2) },
-        swimming,
-        action: actionRef.current,
-        overLand,
-      });
-    }
 
     if (lastPos.current) {
       const dx = t.x - lastPos.current.x;
