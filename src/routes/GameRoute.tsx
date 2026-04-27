@@ -18,6 +18,12 @@ export default function GameRoute() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Tab isn't bound to anything in-game, but the default focus-cycling
+      // behavior shifts the viewport when the R3F canvas wrapper takes focus.
+      if (e.code === 'Tab') {
+        e.preventDefault();
+        return;
+      }
       if (e.code === 'Backquote') {
         e.preventDefault();
         setConsoleOpen((c) => !c);

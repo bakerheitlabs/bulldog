@@ -16,7 +16,8 @@ export type CharacterAction =
   | 'holding-right'
   | 'holding-right-shoot'
   | 'armed-walk'
-  | 'armed-sprint';
+  | 'armed-sprint'
+  | 'swim';
 
 // Kenney Mini Character is authored in T-pose: `arm-right` has no hand bone
 // and the arm mesh extends along the bone's local -X axis (outward, not down).
@@ -81,6 +82,15 @@ export default function CharacterModel({
     const hold = list.find((c) => c.name === 'holding-right');
     if (walk && hold) list.push(combineClips('armed-walk', walk, hold));
     if (sprint && hold) list.push(combineClips('armed-sprint', sprint, hold));
+    // Placeholder swim animation: clone the walk clip until a dedicated swim
+    // GLB lands. clone() deep-copies tracks so the swim action binds to its
+    // own keyframe data — sharing track instances with walk caused the mixer
+    // to double-apply contributions and visibly sink the rig.
+    if (walk) {
+      const swim = walk.clone();
+      swim.name = 'swim';
+      list.push(swim);
+    }
     return list;
   }, [gltf.animations]);
 

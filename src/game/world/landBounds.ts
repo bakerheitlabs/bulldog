@@ -16,6 +16,9 @@ import { getMainAirportPadBounds } from './airport';
 import { ISLAND2_LANDMASS } from './island2';
 
 export const BEACH_WIDTH = 36;
+// Water plane sits a hair below the grass baseline (y=0). Exported so movement
+// code can detect "in water" without re-declaring the constant per-call site.
+export const WATER_Y = -0.02;
 const ISLAND_SAMPLES = 192; // smoothness of the perimeter polygon
 
 export type LandBounds = { minX: number; maxX: number; minZ: number; maxZ: number };
@@ -226,8 +229,30 @@ export type IslandData = {
   // Convex-hull point cloud for the physics collider: top + bottom rings of
   // outer-perimeter points so the hull is a 3D solid with thickness.
   hullPoints: Float32Array;
+  // Underwater slope ring: a triangle mesh forming a ramp around the
+  // perimeter from the beach edge (y=0) out to the shelf toe at
+  // y=-BEACH_SLOPE_DROP. A trimesh handles the non-convex annular shape
+  // cleanly — segmented convex hulls wrap each segment in their own
+  // wedge-shape walls, which created small invisible kinks the swimmer kept
+  // catching on. Kept separate from the main island hull because the
+  // annulus isn't a convex shape.
+  slopeVertices: Float32Array;
+  slopeIndices: Uint32Array;
   bounds: LandBounds; // AABB of outer perimeter
 };
+
+// Slope geometry. The toe sits clearly below the swimmer's capsule bottom
+// (~y=-1.22) so the swimmer passes OVER the toe edge and lands on the slope
+// from above. RUN of 18m gives a gentle ~6.3° climb angle.
+const BEACH_SLOPE_RUN = 18;
+const BEACH_SLOPE_DROP = 2.0;
+// Lift the inner edge of the slope slightly above the beach top so a swimmer
+// climbing the ramp ENDS UP above beach height by the time they reach the
+// perimeter — they then fall the last LIP onto the visible beach. Kept small
+// (≤ capsule lower-hemisphere reach of 0.4m) so walking the OTHER way (off
+// the beach into the water) still rolls the capsule over the lip without
+// needing a jump.
+const BEACH_SLOPE_LIP = 0.15;
 
 function buildIslandData(spec: LandmassSpec): IslandData {
   const samples = buildPerimeter(spec, ISLAND_SAMPLES);
@@ -259,6 +284,42 @@ function buildIslandData(spec: LandmassSpec): IslandData {
     if (z < minZ) minZ = z;
     if (z > maxZ) maxZ = z;
   }
+  // Slope ring as a triangle strip between two concentric rings:
+  //   inner ring: beach edge (outerPolygon) at y=0
+  //   outer ring: shelf toe (outerPolygon + RUN, perimeter normal) at y=-DROP
+  // Each adjacent pair of perimeter samples spans one quad split into two
+  // triangles. Winding is chosen so the triangle normals point UP+OUTWARD —
+  // i.e. the solid side of the trimesh is up, which is what the swimmer
+  // ascends.
+  const N = samples.length;
+  const slopeVertices = new Float32Array(N * 2 * 3);
+  for (let i = 0; i < N; i++) {
+    const s = samples[i];
+    // Inner ring vertex i — at outer perimeter, lifted by BEACH_SLOPE_LIP so
+    // the slope crests above the visible beach. Capsule rides up to here,
+    // then falls onto the prism top at y=0 once it crosses the perimeter.
+    slopeVertices[i * 3 + 0] = s.x + s.nx * BEACH_WIDTH;
+    slopeVertices[i * 3 + 1] = BEACH_SLOPE_LIP;
+    slopeVertices[i * 3 + 2] = s.z + s.nz * BEACH_WIDTH;
+    // Outer ring vertex i (at toe, y=-DROP)
+    slopeVertices[(N + i) * 3 + 0] = s.x + s.nx * (BEACH_WIDTH + BEACH_SLOPE_RUN);
+    slopeVertices[(N + i) * 3 + 1] = -BEACH_SLOPE_DROP;
+    slopeVertices[(N + i) * 3 + 2] = s.z + s.nz * (BEACH_WIDTH + BEACH_SLOPE_RUN);
+  }
+  const slopeIndices = new Uint32Array(N * 6);
+  for (let i = 0; i < N; i++) {
+    const next = (i + 1) % N;
+    // Wind triangles CCW from above so face normals point UP (the side the
+    // swimmer climbs). With perimeter samples ordered CCW from above, the
+    // sequence inner[i] → inner[next] → outer[next] traces CCW.
+    slopeIndices[i * 6 + 0] = i;
+    slopeIndices[i * 6 + 1] = next;
+    slopeIndices[i * 6 + 2] = N + next;
+    slopeIndices[i * 6 + 3] = i;
+    slopeIndices[i * 6 + 4] = N + next;
+    slopeIndices[i * 6 + 5] = N + i;
+  }
+
   return {
     id: spec.id,
     innerShape,
@@ -266,6 +327,8 @@ function buildIslandData(spec: LandmassSpec): IslandData {
     innerPolygon,
     outerPolygon,
     hullPoints: hull,
+    slopeVertices,
+    slopeIndices,
     bounds: { minX, maxX, minZ, maxZ },
   };
 }
@@ -301,4 +364,32 @@ export function getAllIslands(): IslandData[] {
   if (_cached) return _cached;
   _cached = [getMainIslandSpec(), ISLAND2_LANDMASS].map(buildIslandData);
   return _cached;
+}
+
+// Standard ray-casting point-in-polygon. Polygon is in world XZ coords.
+function pointInPolygon(x: number, z: number, poly: PerimeterPoint[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x;
+    const zi = poly[i].z;
+    const xj = poly[j].x;
+    const zj = poly[j].z;
+    const intersect =
+      zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+// True if (x,z) sits over any island's beach footprint (i.e. there's a land
+// collider beneath that point). Used by movement code to decide between
+// walking and swimming. AABB rejection keeps the per-frame cost tiny.
+export function isOverLand(x: number, z: number): boolean {
+  const islands = getAllIslands();
+  for (const island of islands) {
+    const b = island.bounds;
+    if (x < b.minX || x > b.maxX || z < b.minZ || z > b.maxZ) continue;
+    if (pointInPolygon(x, z, island.outerPolygon)) return true;
+  }
+  return false;
 }

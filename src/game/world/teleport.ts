@@ -5,10 +5,12 @@
 
 import { findCellByTag, getPlayerSpawn, type Vec3 } from './cityLayout';
 import { AIRPORTS } from './splineRegions';
+import { DOCK_ENTRY } from './Dock';
 
 export const TELEPORT_DESTINATIONS = [
   'airport',
   'island2',
+  'dock',
   'hospital',
   'gunstore',
   'gun_store',
@@ -38,6 +40,10 @@ export function resolveDestination(name: TeleportDestination): Vec3 | null {
     // Drop the player on island 2's airport parking lot.
     const lot = AIRPORTS[1].parkingLot;
     return [lot.centerX, 1, lot.centerZ];
+  }
+  if (name === 'dock') {
+    // Land-side foot of the pier on the main island's north shore.
+    return DOCK_ENTRY;
   }
   // Tagged grid landmarks: re-use the same "stand on the east-face sidewalk"
   // formula as getPlayerSpawn / getHospitalRespawn.

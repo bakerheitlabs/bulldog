@@ -4,6 +4,7 @@ import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useGameStore } from '@/state/gameStore';
 import { getHospitalRespawn, getPlayerSpawn } from '@/game/world/cityLayout';
+import { isOverLand, WATER_Y } from '@/game/world/landBounds';
 import { consumeTeleport, peekTeleport } from '@/game/world/teleport';
 import { playFootstep } from '@/game/audio/synth';
 import {
@@ -25,6 +26,13 @@ import Parachute from './Parachute';
 
 const SPEED = 5;
 const SPRINT = 9;
+// Initial upward velocity on jump. ~5.5 m/s clears ~1.5m at g=9.81 — high
+// enough to hop a curb or bench, low enough that it doesn't read as a leap.
+const JUMP_SPEED = 5.5;
+// Grounded check: player capsule sits with feet at ~y=0 when standing on the
+// road plane (capsule center at 0.9m). Treat anything within this margin of
+// the resting Y velocity as "on a surface" so jump is reliable on slopes.
+const GROUNDED_VY_EPSILON = 0.5;
 // Mid-air bailout deploys a parachute when the plane is at least this many
 // meters above the runway. Below it, exit snaps to ground next to the plane
 // (current behavior — no value in deploying for a 1m hop).
@@ -39,6 +47,35 @@ const PARACHUTE_LATERAL_SPEED = 4;
 // Y at which the parachute auto-disengages — anything below this is "feet
 // near the ground," and we hand control back to normal walking physics.
 const PARACHUTE_LAND_Y = 1.4;
+// Swimming: half the on-foot pace so water reads as a real obstacle. Target
+// body-center Y sits the player chest-deep (capsule center 0.3m below the
+// water surface puts the head clearly above and the feet clearly below).
+const SWIM_SPEED = 2.5;
+const SWIM_TARGET_Y = WATER_Y - 0.3;
+// How quickly Y velocity converges on the floating target. High enough that
+// a freshly-splashed parachutist surfaces in well under a second.
+const SWIM_VERTICAL_LERP = 6;
+// Hysteresis around WATER_Y. Enter swim when the body dips below WATER_Y;
+// exit when overLand becomes true OR the body climbs above SWIM_EXIT_Y. The
+// exit threshold sits BELOW the slope's resting position (~y=0.5 mid-ramp)
+// so that as soon as the swimmer is partly out of the water and resting on
+// the underwater ramp, walk mode takes over. Walk mode has 2× the horizontal
+// speed and behaves like climbing wet sand instead of frantic doggy paddle.
+const SWIM_ENTER_Y = WATER_Y;
+const SWIM_EXIT_Y = 0.3;
+// Prone swim pose: pitch the visual body 90° forward and lift it so the chest
+// rides at water level instead of sinking to capsule center. Numbers are
+// relative to the (already-yawed) outer mesh group, so positive Y = up in
+// world space and negative pitch = head-forward.
+const PRONE_PITCH = Math.PI / 2;
+const PRONE_LIFT = 0.3;
+// Per-axis pose interpolation rate (1/s). 8 → ~0.12s to most of the way,
+// brisk enough to feel responsive but smooth enough to avoid a snap.
+const POSE_LERP_RATE = 8;
+// Treading bob: small Y oscillation while floating idle in water so the body
+// reads as buoyant rather than nailed in place.
+const TREAD_BOB_HZ = 0.5;
+const TREAD_BOB_AMP = 0.04;
 // Stable references — @react-three/rapier reapplies every mutable RigidBody
 // prop (including `type` AND `position`) when any of them changes by ref.
 // A fresh object/array each render would override the manual setBodyType we
@@ -52,6 +89,10 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
 ) {
   const rigid = useRef<RapierRigidBody | null>(null);
   const meshRef = useRef<THREE.Group>(null);
+  // Swim pose group sits inside meshRef so the pitch-forward rotation stacks
+  // on top of the yaw rotation already applied to meshRef. The capsule body
+  // stays vertical (rotations are locked in Rapier); only the visual leans.
+  const swimPoseRef = useRef<THREE.Group>(null);
   const keys = useKeyboard();
   const spawn = useRef(getPlayerSpawn());
   const setPlayerTransform = useGameStore((s) => s.setPlayerTransform);
@@ -74,6 +115,14 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
   // canopy mesh re-renders when the value flips.
   const parachutingRef = useRef(false);
   const [parachuting, setParachuting] = useState(false);
+  // Swimming: tracked as a ref so the hysteresis check inside useFrame stays
+  // stable across frames without forcing a re-render every transition.
+  const swimmingRef = useRef(false);
+  // Edge-detect Space so holding it doesn't repeatedly fire jumps the moment
+  // the player lands.
+  const jumpHeldRef = useRef(false);
+  // Debug: throttle the per-frame position log so the console isn't flooded.
+  const lastDebugLogRef = useRef(0);
 
   useEffect(() => {
     if (paused) return;
@@ -201,7 +250,7 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
     }
   }, [health]);
 
-  useFrame(() => {
+  useFrame((state, delta) => {
     if (!rigid.current) return;
     // Dev-console teleport. If we're in a vehicle, fire its exit first and
     // bail this frame so the vehicle's own exit-effect can place the body
@@ -294,15 +343,62 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
       .addScaledVector(strafe, right - left);
     if (dir.lengthSq() > 0) dir.normalize();
 
-    const speed = sprint ? SPRINT : SPEED;
+    // Swimming: hysteresis on Y plus an "off all islands" check on XZ. The
+    // XZ test means standing on a dock above water still counts as on land
+    // (dock deck is high enough that Y stays well above SWIM_ENTER_Y), and
+    // walking off the beach edge drops the player into swim once they fall
+    // below the water line.
+    const pos = rigid.current.translation();
+    const overLand = isOverLand(pos.x, pos.z);
+    if (swimmingRef.current) {
+      if (overLand || pos.y > SWIM_EXIT_Y) swimmingRef.current = false;
+    } else {
+      if (!overLand && pos.y < SWIM_ENTER_Y) swimmingRef.current = true;
+    }
+    const swimming = swimmingRef.current;
+
     const linvel = rigid.current.linvel();
-    rigid.current.setLinvel({ x: dir.x * speed, y: linvel.y, z: dir.z * speed }, true);
+    if (swimming) {
+      // Buoyancy: drive Y velocity toward the chest-deep target — but ONLY
+      // upward. If something is already holding the capsule above target
+      // (underwater slope, beach edge, dock collider, mid-air after a jump),
+      // hand Y back to physics rather than yanking the body back down. Active
+      // downward pull was causing the capsule to oscillate between slope
+      // contact and buoyancy-driven sinking, making the climb-out impossible.
+      // Horizontal cap at SWIM_SPEED — no sprint underwater.
+      const yVel =
+        pos.y < SWIM_TARGET_Y
+          ? (SWIM_TARGET_Y - pos.y) * SWIM_VERTICAL_LERP
+          : linvel.y;
+      rigid.current.setLinvel(
+        { x: dir.x * SWIM_SPEED, y: yVel, z: dir.z * SWIM_SPEED },
+        true,
+      );
+    } else {
+      const speed = sprint ? SPRINT : SPEED;
+      const jumpDown = !!keys.current['Space'];
+      const grounded = Math.abs(linvel.y) < GROUNDED_VY_EPSILON;
+      const jumping = jumpDown && !jumpHeldRef.current && grounded;
+      jumpHeldRef.current = jumpDown;
+      const yVel = jumping ? JUMP_SPEED : linvel.y;
+      rigid.current.setLinvel({ x: dir.x * speed, y: yVel, z: dir.z * speed }, true);
+    }
 
     const moving = dir.lengthSq() > 0;
     const armed = !!equipped;
     const firing = armed && mouseDownRef.current && document.pointerLockElement != null;
     let nextAction: CharacterAction;
-    if (firing) nextAction = 'holding-right-shoot';
+    // Swim overrides every other locomotion clip — including weapon poses,
+    // since holding a pistol while doing a doggy-paddle would clip into the
+    // water and look wrong. The weapon model stays parented to the arm bone;
+    // it just rides along with the swim animation. Pressing W (forward > 0)
+    // enters the prone "stroke" pose — paired with the walk-aliased swim clip
+    // it reads as kicking and arm-pulls. With no forward input we play idle
+    // so the upright body looks like floating, not running on water.
+    const proneSwim = swimming && forward > 0;
+    if (proneSwim) nextAction = 'swim';
+    else if (swimming) nextAction = 'idle';
+    else if (firing) nextAction = 'holding-right-shoot';
     else if (armed && moving) nextAction = sprint ? 'armed-sprint' : 'armed-walk';
     else if (armed) nextAction = 'holding-right';
     else if (moving) nextAction = sprint ? 'sprint' : 'walk';
@@ -317,15 +413,54 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
       meshRef.current.rotation.y = yaw + Math.PI;
     }
 
+    // Drive the visual swim pose. Targets:
+    //   prone forward stroke: pitch -90°, lift body to surface
+    //   treading water:       pitch 0,    small Y bob
+    //   on land:              pitch 0,    Y at 0 (settle to neutral)
+    // Frame-rate-independent lerp via 1 - exp(-rate*delta).
+    const swimPose = swimPoseRef.current;
+    if (swimPose) {
+      const targetPitch = proneSwim ? PRONE_PITCH : 0;
+      let targetY = 0;
+      if (proneSwim) targetY = PRONE_LIFT;
+      else if (swimming) {
+        targetY =
+          Math.sin(state.clock.elapsedTime * Math.PI * 2 * TREAD_BOB_HZ) * TREAD_BOB_AMP;
+      }
+      const k = 1 - Math.exp(-POSE_LERP_RATE * delta);
+      swimPose.rotation.x += (targetPitch - swimPose.rotation.x) * k;
+      swimPose.position.y += (targetY - swimPose.position.y) * k;
+    }
+
     const t = rigid.current.translation();
     setPlayerTransform([t.x, t.y, t.z], yaw);
     setLocalYaw(yaw);
+
+    // DEBUG: ~4Hz dump. New fields: input vector + full linvel so we can see
+    // whether the slope is blocking forward motion even when W is pressed.
+    if (state.clock.elapsedTime - lastDebugLogRef.current > 0.25) {
+      lastDebugLogRef.current = state.clock.elapsedTime;
+      const lv = rigid.current.linvel();
+      console.log('[player]', {
+        pos: { x: +t.x.toFixed(2), y: +t.y.toFixed(3), z: +t.z.toFixed(2) },
+        linvel: {
+          x: +lv.x.toFixed(2),
+          y: +lv.y.toFixed(3),
+          z: +lv.z.toFixed(2),
+        },
+        input: { f: forward, b: back, l: left, r: right },
+        dir: { x: +dir.x.toFixed(2), z: +dir.z.toFixed(2) },
+        swimming,
+        action: actionRef.current,
+        overLand,
+      });
+    }
 
     if (lastPos.current) {
       const dx = t.x - lastPos.current.x;
       const dz = t.z - lastPos.current.z;
       const moved = Math.hypot(dx, dz);
-      if (dir.lengthSq() > 0 && moved > 0.001) {
+      if (!swimming && dir.lengthSq() > 0 && moved > 0.001) {
         stepAccum.current += moved;
         const strideUnits = sprint ? 2.2 : 1.6;
         if (stepAccum.current >= strideUnits) {
@@ -358,31 +493,33 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
       <CapsuleCollider args={[0.5, 0.4]} />
       <Parachute visible={parachuting} />
       <group ref={meshRef} visible={!inVehicle}>
-        <GltfBoundary
-          fallback={
-            <group>
-              <mesh position={[0, 0, 0]} castShadow>
-                <capsuleGeometry args={[0.4, 1.0, 4, 8]} />
-                <meshStandardMaterial color="#3a6df0" />
-              </mesh>
-              <mesh position={[0, 0.95, 0]} castShadow>
-                <sphereGeometry args={[0.28, 12, 12]} />
-                <meshStandardMaterial color="#e3b27a" />
-              </mesh>
-              <mesh position={[0, 0.95, -0.27]}>
-                <boxGeometry args={[0.1, 0.1, 0.02]} />
-                <meshStandardMaterial color="#222" />
-              </mesh>
-            </group>
-          }
-        >
-          <CharacterModel
-            variant={PLAYER_VARIANT}
-            action={action}
-            yBase={-0.9}
-            weaponVariant={equipped ? WEAPON_MODEL[equipped] : null}
-          />
-        </GltfBoundary>
+        <group ref={swimPoseRef}>
+          <GltfBoundary
+            fallback={
+              <group>
+                <mesh position={[0, 0, 0]} castShadow>
+                  <capsuleGeometry args={[0.4, 1.0, 4, 8]} />
+                  <meshStandardMaterial color="#3a6df0" />
+                </mesh>
+                <mesh position={[0, 0.95, 0]} castShadow>
+                  <sphereGeometry args={[0.28, 12, 12]} />
+                  <meshStandardMaterial color="#e3b27a" />
+                </mesh>
+                <mesh position={[0, 0.95, -0.27]}>
+                  <boxGeometry args={[0.1, 0.1, 0.02]} />
+                  <meshStandardMaterial color="#222" />
+                </mesh>
+              </group>
+            }
+          >
+            <CharacterModel
+              variant={PLAYER_VARIANT}
+              action={action}
+              yBase={-0.9}
+              weaponVariant={equipped ? WEAPON_MODEL[equipped] : null}
+            />
+          </GltfBoundary>
+        </group>
       </group>
     </RigidBody>
   );

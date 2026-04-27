@@ -263,6 +263,45 @@ function IslandLayer() {
   );
 }
 
+// Dock on the main island's north shore (facing island 2). Single brown
+// stripe on the minimap representing the pier deck.
+// E-shaped pier on the main island's north shore: spine at z=400 with
+// three 80m fingers at x ∈ {-30, 0, +30} extending north into open water.
+function DockLayer() {
+  const SHORE_Z = 400;
+  const FINGER_LEN = 80;
+  const FINGER_W = 6;
+  const SPINE_W = 6;
+  const SPINE_HALF_LEN = 33;
+  const FINGER_X = [-30, 0, 30];
+  const COLOR = '#8a6a3a';
+  const spine = toMapPos(-SPINE_HALF_LEN, SHORE_Z);
+  return (
+    <g>
+      <rect
+        x={spine.x}
+        y={spine.y}
+        width={SPINE_HALF_LEN * 2}
+        height={SPINE_W}
+        fill={COLOR}
+      />
+      {FINGER_X.map((fx) => {
+        const p = toMapPos(fx - FINGER_W / 2, SHORE_Z);
+        return (
+          <rect
+            key={`finger_${fx}`}
+            x={p.x}
+            y={p.y}
+            width={FINGER_W}
+            height={FINGER_LEN}
+            fill={COLOR}
+          />
+        );
+      })}
+    </g>
+  );
+}
+
 function SuburbLayer() {
   const content = useMemo(() => {
     return SPLINE_REGIONS.flatMap((s) => {
@@ -852,6 +891,7 @@ export default function CityMap({ variant }: CityMapProps) {
         <AirportLayer showLabels={!isMinimap} />
         <MapCells showLabels={!isMinimap} />
         <SuburbLayer />
+        <DockLayer />
         <g
           transform={`translate(${player.x} ${player.y}) rotate(${pose.heading}) scale(${markerScale})`}
         >

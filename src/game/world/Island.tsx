@@ -1,14 +1,13 @@
-import { ConvexHullCollider, RigidBody } from '@react-three/rapier';
+import { ConvexHullCollider, RigidBody, TrimeshCollider } from '@react-three/rapier';
 import { useMemo } from 'react';
 import * as THREE from 'three';
-import { getAllIslands } from './landBounds';
+import { getAllIslands, WATER_Y } from './landBounds';
 
 const WATER_SIZE = 8000; // covers well past the fog horizon from any vantage
 // Layering: water sits well below land. The grass plane keeps the existing
 // y=0 baseline so road stripes (y=0.01) and per-cell surfaces (y=0.02) layer
 // on top with the same offsets they did before. Beach is a hair below grass
 // so the inner grass shape cleanly hides the beach where land is dry.
-const WATER_Y = -0.02;
 const BEACH_Y = -0.005;
 const GRASS_Y = 0;
 
@@ -33,6 +32,10 @@ export default function Island() {
         <group key={island.id}>
           <RigidBody type="fixed" colliders={false}>
             <ConvexHullCollider args={[island.hullPoints]} />
+            {/* Underwater climb-out ramp: a single trimesh ring sloping from
+                the beach edge (y=0) down to the shelf toe (y=-DROP). Hidden
+                by the water plane so no visible mesh needed. */}
+            <TrimeshCollider args={[island.slopeVertices, island.slopeIndices]} />
           </RigidBody>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, BEACH_Y, 0]} receiveShadow>
             <shapeGeometry args={[island.outerShape]} />

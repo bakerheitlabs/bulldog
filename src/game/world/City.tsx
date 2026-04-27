@@ -2,6 +2,7 @@ import AirportRegion from './AirportRegion';
 import Buildings from './Buildings';
 import DistantBuildings from './DistantBuildings';
 import DistantRoads from './DistantRoads';
+import Dock from './Dock';
 import GroundAndProps from './GroundAndProps';
 import Island from './Island';
 import Island2Village from './Island2Village';
@@ -24,6 +25,7 @@ export default function City({ paused }: { paused: boolean }) {
       <TrafficLights />
       <AirportRegion paused={paused} />
       <Island2Village />
+      <Dock />
     </group>
   );
 }
