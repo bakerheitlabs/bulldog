@@ -3,6 +3,7 @@ import SplashRoute from './routes/SplashRoute';
 import MenuRoute from './routes/MenuRoute';
 import SettingsRoute from './routes/SettingsRoute';
 import GameRoute from './routes/GameRoute';
+import MultiplayerRoute from './routes/MultiplayerRoute';
 
 export default function App() {
   return (
@@ -11,6 +12,7 @@ export default function App() {
         <Route path="/" element={<SplashRoute />} />
         <Route path="/menu" element={<MenuRoute />} />
         <Route path="/settings" element={<SettingsRoute />} />
+        <Route path="/multiplayer" element={<MultiplayerRoute />} />
         <Route path="/game" element={<GameRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

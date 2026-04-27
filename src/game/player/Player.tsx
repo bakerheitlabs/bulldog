@@ -17,6 +17,7 @@ import {
 } from '@/game/vehicles/vehicleState';
 import { cameraState } from './cameraState';
 import { useKeyboard } from './useKeyboard';
+import { setLocalAction, setLocalYaw } from './playerLocalState';
 import CharacterModel, { type CharacterAction } from '@/game/characters/CharacterModel';
 import GltfBoundary from '@/game/world/GltfBoundary';
 import { PLAYER_VARIANT, WEAPON_MODEL } from '@/game/world/cityAssets';
@@ -310,6 +311,7 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
       actionRef.current = nextAction;
       setAction(nextAction);
     }
+    setLocalAction(nextAction);
 
     if (meshRef.current) {
       meshRef.current.rotation.y = yaw + Math.PI;
@@ -317,6 +319,7 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
 
     const t = rigid.current.translation();
     setPlayerTransform([t.x, t.y, t.z], yaw);
+    setLocalYaw(yaw);
 
     if (lastPos.current) {
       const dx = t.x - lastPos.current.x;

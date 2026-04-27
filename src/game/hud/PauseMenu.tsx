@@ -1,6 +1,7 @@
 import { useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSaveStore } from '@/state/saveStore';
+import { useNetStore } from '@/multiplayer/netStore';
 import { tokens } from '@/ui/tokens';
 import CityMap from './CityMap';
 
@@ -65,14 +66,36 @@ function MenuRow({
 export default function PauseMenu({ onResume }: { onResume: () => void }) {
   const navigate = useNavigate();
   const save = useSaveStore((s) => s.save);
+  const inMp = useNetStore((s) => s.inGame);
+  const isHost = useNetStore((s) => s.isHost);
+  const stopHost = useNetStore((s) => s.stopHost);
+  const disconnect = useNetStore((s) => s.disconnect);
   const [screen, setScreen] = useState<'menu' | 'map'>('menu');
   const [activeIdx, setActiveIdx] = useState(0);
 
   const items: MenuItem[] = [
     { label: 'Resume', hint: 'Esc', onClick: onResume, variant: 'primary' },
     { label: 'Map', hint: '↵', onClick: () => setScreen('map') },
-    { label: 'Save Game', hint: 'Auto', onClick: () => save('auto', 'Auto Save') },
-    { label: 'Main Menu', onClick: () => navigate('/menu'), variant: 'danger' },
+    // In MP, only the host saves (clients have no authoritative state to
+    // persist). The Phase 6 polish path is to hide save entirely for
+    // non-hosts; keeping it visible-but-inert would be confusing.
+    ...(inMp && !isHost
+      ? []
+      : [{ label: 'Save Game', hint: 'Auto', onClick: () => save('auto', 'Auto Save') }]),
+    ...(inMp
+      ? [
+          {
+            label: isHost ? 'End Session' : 'Leave Session',
+            hint: 'MP',
+            onClick: async () => {
+              if (isHost) await stopHost();
+              else await disconnect();
+              navigate('/menu');
+            },
+            variant: 'danger' as const,
+          },
+        ]
+      : [{ label: 'Main Menu', onClick: () => navigate('/menu'), variant: 'danger' as const }]),
   ];
 
   const panelStyle: CSSProperties = {

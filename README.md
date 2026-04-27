@@ -29,14 +29,65 @@ npm install
 npm run dev
 ```
 
-Then open the URL printed by Vite. Production build via `npm run build`.
+`npm run dev` starts both the Vite dev server and an Electron window pointing at it. Production build via `npm run build`, then `npm start` to launch the bundled Electron app.
+
+To open in a browser instead (no multiplayer):
+
+```bash
+npm run dev:web
+```
+
+## Multiplayer
+
+Bulldog ships a built-in host-authoritative multiplayer mode over WebSockets, exposed only in the desktop (Electron) build because browsers cannot accept inbound socket connections.
+
+**Hosting**
+
+1. Main menu → **Multiplayer** → **Host Game**.
+2. The screen lists every detected LAN address plus your detected WAN IP. Pick a port (default `7777`), set a name, click **Start Hosting**.
+3. Wait in the lobby until peers join. Click **Launch World** to drop everyone into the city together.
+
+**Joining**
+
+1. Main menu → **Multiplayer** → **Join Game**.
+2. Enter the host's address (LAN address from their lobby screen for same-Wi-Fi, WAN IP for internet) and port. Click **Connect**.
+3. You'll see the lobby and chat. The host launches the world for everyone.
+
+**WAN play (internet)**
+
+LAN play works with no setup. To play across the internet, the host must forward the chosen TCP port (default `7777`) to their machine on their router. The exact steps depend on your router; the WAN address shown in the host screen is what your friends connect to.
+
+**What syncs**
+
+- Player position, rotation, animation, weapon
+- Player-driven cars (entry/exit + pose)
+- Pedestrians and cops (host runs AI; clients render)
+- Gunshots and NPC damage (host raycasts authoritatively)
+- World time of day and weather
+
+**What doesn't sync (yet)**
+
+- AI-driven traffic and police cruisers (clients see no AI cars)
+- Airplanes (planes still work in MP for the local pilot but aren't replicated)
+- Target dummies in the gun range (each player damages their own copy)
+- Saves on client side (only the host's session is saved)
+
+**Two windows on one machine for testing**
+
+Launch a second Electron instance with a separate user-data dir so localStorage doesn't collide:
+
+```bash
+ELECTRON_USER_DATA_DIR=/tmp/bulldog-2 npm run dev:electron
+```
+
+Host on `127.0.0.1:7777` from one window and join from the other.
 
 ## Controls
 
 - WASD — move · Shift — sprint · Mouse — look · C — orbit camera
-- LMB — shoot · F — punch · R — reload · 1/2 — equip weapon
+- LMB — shoot · F — punch · R — reload · 1/2/3 — equip weapon
 - E — interact (enter vehicles, use shops)
-- In vehicles: W/S throttle · A/D steer · E exit
+- In vehicles: W/S throttle · A/D steer · E exit · L lights · H horn/siren · G landing gear
 
 ## Third-party assets
 

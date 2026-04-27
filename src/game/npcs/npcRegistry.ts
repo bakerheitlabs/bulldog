@@ -1,11 +1,25 @@
 // Runtime registry of damageable NPCs (pedestrians for now).
 // Used by punch/melee + weapons hitscan.
+//
+// Extended for multiplayer sync: NPCs now carry a `kind`, a numeric
+// `variantIdx` (encoded variant for snapshot transmission), and getter
+// callbacks for yaw/hp/action. Hostloop enumerates this registry via
+// `forEachNpc` to build the snapshot's npcs[] entries; clients receive those
+// and feed remoteNpcsStore for visual-only rendering.
 
 import * as THREE from 'three';
 
+export type NpcKind = 'ped' | 'cop';
+export type NpcAction = 'idle' | 'walk' | 'sprint' | 'die';
+
 export type NpcEntry = {
   id: string;
+  kind: NpcKind;
+  variantIdx: number;
   getPosition: () => THREE.Vector3;
+  getYaw: () => number;
+  getHp: () => number;
+  getAction: () => NpcAction;
   radius: number;
   height: number;
   alive: boolean;
@@ -19,6 +33,14 @@ export function registerNpc(entry: NpcEntry) {
   return () => {
     npcs.delete(entry.id);
   };
+}
+
+export function forEachNpc(cb: (entry: NpcEntry) => void): void {
+  for (const n of npcs.values()) cb(n);
+}
+
+export function npcCount(): number {
+  return npcs.size;
 }
 
 const _origin = new THREE.Vector3();

@@ -47,6 +47,9 @@ export default function MenuRoute() {
       <button style={disabledStyle} disabled title="Coming soon">
         Load Game
       </button>
+      <button style={buttonStyle} onClick={() => navigate('/multiplayer')}>
+        Multiplayer
+      </button>
       <button style={buttonStyle} onClick={() => navigate('/settings')}>
         Settings
       </button>

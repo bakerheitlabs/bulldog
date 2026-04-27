@@ -25,6 +25,12 @@ for (const name of renames) {
   }
 }
 
-// Remove any stale package.json marker from previous builds.
-const stalePkg = path.join(outDir, 'package.json');
-if (fs.existsSync(stalePkg)) fs.unlinkSync(stalePkg);
+// The main entry is named main.cjs so Electron loads it as CJS regardless of
+// the root package.json's "type": "module". But subdir files (net/*.js) keep
+// the .js extension and would inherit "type": "module" from root unless we
+// override it here. Writing a package.json marker pins the whole dist-electron
+// subtree to CJS.
+fs.writeFileSync(
+  path.join(outDir, 'package.json'),
+  JSON.stringify({ type: 'commonjs' }, null, 2) + '\n',
+);

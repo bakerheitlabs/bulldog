@@ -4,6 +4,7 @@ import { useVehicleStore } from './vehicleState';
 import { findNearestVehicle } from './vehicleRegistry';
 import { findNearestAirplane } from '@/game/airplanes/airplaneRegistry';
 import { ENTER_RANGE as PLANE_ENTER_RANGE } from '@/game/airplanes/airplaneConstants';
+import { useNetStore } from '@/multiplayer/netStore';
 
 const CAR_ENTER_RANGE = 3.5;
 
@@ -20,11 +21,15 @@ export function useVehicleInteraction(enabled: boolean) {
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
       const { drivenCarId, drivenPlaneId, enterCar, exitCar, enterPlane, exitPlane } =
         useVehicleStore.getState();
+      const netState = useNetStore.getState();
+      const inMp = netState.inGame;
       if (drivenCarId) {
-        exitCar();
+        if (inMp) netState.requestExitCar();
+        else exitCar();
         return;
       }
       if (drivenPlaneId) {
+        // Plane MP sync ships in a later phase — exit locally for now.
         exitPlane();
         return;
       }
@@ -36,10 +41,16 @@ export function useVehicleInteraction(enabled: boolean) {
       const nearestCar = findNearestVehicle(playerXZ, CAR_ENTER_RANGE);
       const nearestPlane = findNearestAirplane(playerXZ, PLANE_ENTER_RANGE);
       if (nearestPlane && (!nearestCar || nearestPlane.dist < nearestCar.dist)) {
+        // Planes aren't synced over the network in Phase 3; entering one in
+        // an MP session is local-only — others won't see it. Still allow it
+        // so airport interactions stay functional.
         enterPlane(nearestPlane.entry.id);
         return;
       }
-      if (nearestCar) enterCar(nearestCar.entry.id);
+      if (nearestCar) {
+        if (inMp) netState.requestEnterCar(nearestCar.entry.id);
+        else enterCar(nearestCar.entry.id);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

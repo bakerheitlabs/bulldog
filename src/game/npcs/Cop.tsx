@@ -7,7 +7,8 @@ import {
   type Waypoint,
 } from '@/game/world/cityLayout';
 import { PED_WAYPOINTS } from '@/game/world/worldWaypoints';
-import { registerNpc } from './npcRegistry';
+import { registerNpc, type NpcAction } from './npcRegistry';
+import { PEDESTRIAN_VARIANTS } from '@/game/world/cityAssets';
 import CharacterModel, { type CharacterAction } from '@/game/characters/CharacterModel';
 import GltfBoundary from '@/game/world/GltfBoundary';
 import BloodPool from './BloodPool';
@@ -90,7 +91,15 @@ export default function Cop({
   patrol?: boolean;
   startPos?: [number, number, number];
 }) {
-  const id = useMemo(() => `cop_${seed}_${Math.random().toString(36).slice(2, 7)}`, [seed]);
+  // Stable id (no random suffix) for multiplayer snapshot addressing.
+  const id = useMemo(() => `cop_${seed}`, [seed]);
+  const yawRef = useRef(0);
+  const hpRef = useRef(MAX_HP);
+  const actionRef = useRef<NpcAction>('idle');
+  const COP_VARIANT_IDX = useMemo(
+    () => PEDESTRIAN_VARIANTS.indexOf('characterMaleC'),
+    [],
+  );
   const startId = useMemo(
     () => (patrol ? pickRandomWaypointId() : pickNearPlayerWaypointId()),
     [patrol],
@@ -129,20 +138,26 @@ export default function Cop({
   useEffect(() => {
     return registerNpc({
       id,
+      kind: 'cop',
+      variantIdx: COP_VARIANT_IDX,
       getPosition: () => stateRef.current.pos,
+      getYaw: () => yawRef.current,
+      getHp: () => hpRef.current,
+      getAction: () => actionRef.current,
       radius: 0.55,
       height: 1.8,
       alive: !dead,
       takeHit: (damage: number) => {
         setHp((h) => {
           const next = Math.max(0, h - damage);
+          hpRef.current = next;
           if (h > 0 && next === 0) useGameStore.getState().bumpHeat(35);
           return next;
         });
         setFlash(1);
       },
     });
-  }, [id, dead]);
+  }, [id, dead, COP_VARIANT_IDX]);
 
   useEffect(() => {
     if (flash <= 0) return;
@@ -217,7 +232,11 @@ export default function Cop({
 
     if (groupRef.current) {
       groupRef.current.position.set(s.pos.x, 0, s.pos.z);
-      if (facingDir) groupRef.current.rotation.y = Math.atan2(facingDir.x, facingDir.z);
+      if (facingDir) {
+        const yaw = Math.atan2(facingDir.x, facingDir.z);
+        yawRef.current = yaw;
+        groupRef.current.rotation.y = yaw;
+      }
     }
 
     // action selection
@@ -226,6 +245,8 @@ export default function Cop({
     else if (moving) next = hostile ? 'armed-sprint' : 'armed-walk';
     else next = 'holding-right';
     if (next !== action) setAction(next);
+    // Map cop's CharacterAction to the broader NpcAction set used by sync.
+    actionRef.current = moving ? (hostile ? 'sprint' : 'walk') : 'idle';
     s.wasMoving = moving;
     s.wasShooting = shooting;
   });

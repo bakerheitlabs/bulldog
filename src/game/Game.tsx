@@ -28,8 +28,16 @@ import {
   useVehicleStore,
 } from './vehicles/vehicleState';
 import { useGameStore, WORLD_TIME_RATE } from '@/state/gameStore';
+import { useNetStore } from '@/multiplayer/netStore';
+import MultiplayerProvider from '@/multiplayer/MultiplayerProvider';
 
 function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () => void }) {
+  const inMpSession = useNetStore((s) => s.inGame);
+  const isHost = useNetStore((s) => s.isHost);
+  // In MP, only the host runs NPC AI / spawners; clients render NPCs from
+  // host snapshots via MultiplayerProvider. In single-player both flags are
+  // satisfied (inMpSession=false → first clause → enabled).
+  const npcsEnabled = !inMpSession || isHost;
   const playerRef = useRef<RapierRigidBody | null>(null);
   const tmp = useRef(new THREE.Vector3());
   const drivenCarId = useVehicleStore((s) => s.drivenCarId);
@@ -62,14 +70,15 @@ function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () 
       <DayNightLighting />
       <WeatherEffects />
       <City paused={paused} />
-      <Spawner paused={paused} />
-      <DebugTraffic paused={paused} />
+      {npcsEnabled && <Spawner paused={paused} />}
+      {npcsEnabled && <DebugTraffic paused={paused} />}
       <Range />
       <GunStoreCounter onOpen={onOpenShop} />
       <HospitalCounter />
       <MechanicShop />
       <DrivableCars paused={paused} />
       <Player ref={playerRef} paused={paused} />
+      <MultiplayerProvider />
       <ThirdPersonCamera target={camTarget} />
       <HitFx />
     </>
@@ -93,6 +102,11 @@ export default function Game({
   const tickWorldTime = useGameStore((s) => s.tickWorldTime);
   const tickWeather = useGameStore((s) => s.tickWeather);
   const lastTickRef = useRef(performance.now());
+  // In MP, only the host advances world time / weather / wanted heat.
+  // Clients receive worldTime + weather via snapshot and skip these ticks
+  // entirely so the world stays synchronised. Single-player keeps every
+  // tick (inMpSession=false short-circuits the second clause).
+  const inMpClient = useNetStore((s) => s.inGame && !s.isHost);
   useEffect(() => {
     if (paused) {
       lastTickRef.current = performance.now();
@@ -104,14 +118,16 @@ export default function Game({
       const dt = now - lastTickRef.current;
       lastTickRef.current = now;
       tickPlaytime(dt);
-      tickWanted(dt);
-      tickWorldTime(dt);
-      tickWeather((dt / 1000) * WORLD_TIME_RATE);
+      if (!inMpClient) {
+        tickWanted(dt);
+        tickWorldTime(dt);
+        tickWeather((dt / 1000) * WORLD_TIME_RATE);
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [paused, tickPlaytime, tickWanted, tickWorldTime, tickWeather]);
+  }, [paused, tickPlaytime, tickWanted, tickWorldTime, tickWeather, inMpClient]);
 
   useEffect(() => {
     if ((paused || mouseFree) && document.pointerLockElement) {

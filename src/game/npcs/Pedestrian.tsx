@@ -3,8 +3,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { Waypoint } from '@/game/world/cityLayout';
 import { PED_WAYPOINTS } from '@/game/world/worldWaypoints';
-import { pickPedestrianVariantBySeed } from '@/game/world/cityAssets';
-import { registerNpc } from './npcRegistry';
+import {
+  PEDESTRIAN_VARIANTS,
+  pickPedestrianVariantBySeed,
+} from '@/game/world/cityAssets';
+import { registerNpc, type NpcAction } from './npcRegistry';
 import CharacterModel from '@/game/characters/CharacterModel';
 import GltfBoundary from '@/game/world/GltfBoundary';
 import BloodPool from './BloodPool';
@@ -30,13 +33,23 @@ export default function Pedestrian({
   // but gives ~0 island 2 coverage, so the spawner overrides with island IDs.
   startId?: string;
 }) {
-  const id = useMemo(() => `ped_${seed}_${Math.random().toString(36).slice(2, 7)}`, [seed]);
+  // Stable id (no random suffix) so multiplayer snapshots can address the
+  // same pedestrian across hosts/clients. The `seed` is unique per spawned
+  // instance (assigned by Spawner).
+  const id = useMemo(() => `ped_${seed}`, [seed]);
   const startId = useMemo(() => startIdProp ?? randomWaypointId(), [startIdProp]);
   const start = PED_WAYPOINTS[startId];
   const groupRef = useRef<THREE.Group>(null);
+  const yawRef = useRef(0);
+  const hpRef = useRef(MAX_HP);
+  const actionRef = useRef<NpcAction>('idle');
   const [hp, setHp] = useState(MAX_HP);
   const [flash, setFlash] = useState(0);
   const dead = hp <= 0;
+  const variantIdx = useMemo(
+    () => Math.abs(Math.floor(seed)) % PEDESTRIAN_VARIANTS.length,
+    [seed],
+  );
   const stateRef = useRef<{
     pos: THREE.Vector3;
     targetId: string;
@@ -59,13 +72,19 @@ export default function Pedestrian({
   useEffect(() => {
     const cleanup = registerNpc({
       id,
+      kind: 'ped',
+      variantIdx,
       getPosition: () => stateRef.current.pos,
+      getYaw: () => yawRef.current,
+      getHp: () => hpRef.current,
+      getAction: () => actionRef.current,
       radius: 0.55,
       height: 1.8,
       alive: !dead,
       takeHit: (damage: number) => {
         setHp((h) => {
           const next = Math.max(0, h - damage);
+          hpRef.current = next;
           if (h > 0 && next === 0) useGameStore.getState().bumpHeat(22);
           return next;
         });
@@ -73,7 +92,7 @@ export default function Pedestrian({
       },
     });
     return cleanup;
-  }, [id, dead]);
+  }, [id, dead, variantIdx]);
 
   useEffect(() => {
     if (flash <= 0) return;
@@ -82,7 +101,10 @@ export default function Pedestrian({
   }, [flash]);
 
   useFrame((_, dt) => {
-    if (dead) return;
+    if (dead) {
+      actionRef.current = 'die';
+      return;
+    }
     const s = stateRef.current;
     const dir = s.target.clone().sub(s.pos);
     const dist = dir.length();
@@ -90,13 +112,17 @@ export default function Pedestrian({
       const next = pickNext(s.targetId, null);
       s.targetId = next.id;
       s.target.set(...next.pos);
+      actionRef.current = 'idle';
     } else {
       dir.normalize();
       const step = Math.min(SPEED * dt, dist);
       s.pos.addScaledVector(dir, step);
+      const yaw = Math.atan2(dir.x, dir.z);
+      yawRef.current = yaw;
+      actionRef.current = 'walk';
       if (groupRef.current) {
         groupRef.current.position.set(s.pos.x, 0, s.pos.z);
-        groupRef.current.rotation.y = Math.atan2(dir.x, dir.z);
+        groupRef.current.rotation.y = yaw;
       }
     }
   });

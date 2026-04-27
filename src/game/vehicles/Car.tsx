@@ -28,6 +28,7 @@ import {
 import { useCarDriver } from './useCarDriver';
 import { registerVehicle } from './vehicleRegistry';
 import { useVehicleStore } from './vehicleState';
+import { useRemoteCarPose } from '@/multiplayer/useRemoteCarPose';
 
 export type CarVariantKey = CarVariant | 'carPolice';
 
@@ -159,6 +160,10 @@ export default function Car({
   }, [id]);
 
   useCarDriver({ id, rigidRef, paused, variant });
+  // Multiplayer: when a peer is driving this car, follow snapshot pose. The
+  // hook is a no-op when no remote driver is registered for this id (i.e.
+  // single-player or this car is locally driven / parked).
+  useRemoteCarPose({ id, rigidRef });
 
   const onHit = useCallback(
     (payload: CollisionEnterPayload) => {

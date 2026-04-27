@@ -7,6 +7,7 @@ import { raycastNpcs } from '@/game/npcs/npcRegistry';
 import { WEAPONS, WEAPON_HOTKEYS } from './weapons';
 import { spawnTracer } from './HitFx';
 import { playGunshot, playReload } from '@/game/audio/synth';
+import { useNetStore } from '@/multiplayer/netStore';
 import type { WeaponId } from '@/save/schema';
 
 export function useWeaponController({ paused }: { paused: boolean }) {
@@ -89,6 +90,9 @@ export function useWeaponController({ paused }: { paused: boolean }) {
     const baseDir = new THREE.Vector3();
     camera.getWorldDirection(baseDir);
 
+    const inMp = useNetStore.getState().inGame;
+    const fireWeapon = useNetStore.getState().fireWeapon;
+
     for (let i = 0; i < def.projectileCount; i++) {
       const dir = baseDir.clone();
       const spreadRad = (def.spreadDeg * Math.PI) / 180;
@@ -99,24 +103,54 @@ export function useWeaponController({ paused }: { paused: boolean }) {
       const up = new THREE.Vector3().crossVectors(right, dir).normalize();
       dir.addScaledVector(right, Math.tan(yaw)).addScaledVector(up, Math.tan(pitch)).normalize();
 
+      // Targets stay client-local in MP (the gun range is a single-player
+      // feature). Always raycast + apply target damage locally.
       const targetHit = raycastTargets(origin, dir, def.range);
-      const npcHit = raycastNpcs(origin, dir, def.range);
-      const useNpc =
-        npcHit && (!targetHit || npcHit.dist < targetHit.dist);
-      let endPoint: THREE.Vector3;
-      if (useNpc && npcHit) {
-        const p = npcHit.entry.getPosition();
-        endPoint = p.clone().add(new THREE.Vector3(0, npcHit.entry.height / 2, 0));
-        npcHit.entry.takeHit(def.damage, dir.clone());
-      } else if (targetHit) {
-        endPoint = targetHit.entry.position
-          .clone()
-          .add(new THREE.Vector3(0, targetHit.entry.height / 2, 0));
-        targetHit.entry.takeHit(def.damage);
+
+      if (inMp) {
+        // Multiplayer: NPC damage is host-authoritative — funnel through the
+        // net store. Host gets back the resolved tracer endpoint via the
+        // event:fire echo (skipped for self) and clients via the same event.
+        // We still spawn a local tracer so the shooter sees it instantly.
+        let localEnd: THREE.Vector3;
+        if (targetHit) {
+          localEnd = targetHit.entry.position
+            .clone()
+            .add(new THREE.Vector3(0, targetHit.entry.height / 2, 0));
+          targetHit.entry.takeHit(def.damage);
+        } else {
+          // Predict the endpoint by raycasting NPCs locally for visual feel.
+          // Host's authoritative result may differ slightly but the tracer
+          // is fire-and-forget — no correction needed.
+          const npcHit = raycastNpcs(origin, dir, def.range);
+          if (npcHit) {
+            const p = npcHit.entry.getPosition();
+            localEnd = p.clone().add(new THREE.Vector3(0, npcHit.entry.height / 2, 0));
+          } else {
+            localEnd = origin.clone().addScaledVector(dir, def.range);
+          }
+        }
+        spawnTracer(origin.clone().addScaledVector(dir, 0.5), localEnd);
+        fireWeapon(equipped, [origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z]);
       } else {
-        endPoint = origin.clone().addScaledVector(dir, def.range);
+        const npcHit = raycastNpcs(origin, dir, def.range);
+        const useNpc =
+          npcHit && (!targetHit || npcHit.dist < targetHit.dist);
+        let endPoint: THREE.Vector3;
+        if (useNpc && npcHit) {
+          const p = npcHit.entry.getPosition();
+          endPoint = p.clone().add(new THREE.Vector3(0, npcHit.entry.height / 2, 0));
+          npcHit.entry.takeHit(def.damage, dir.clone());
+        } else if (targetHit) {
+          endPoint = targetHit.entry.position
+            .clone()
+            .add(new THREE.Vector3(0, targetHit.entry.height / 2, 0));
+          targetHit.entry.takeHit(def.damage);
+        } else {
+          endPoint = origin.clone().addScaledVector(dir, def.range);
+        }
+        spawnTracer(origin.clone().addScaledVector(dir, 0.5), endPoint);
       }
-      spawnTracer(origin.clone().addScaledVector(dir, 0.5), endPoint);
     }
   });
 
