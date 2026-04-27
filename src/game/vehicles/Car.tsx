@@ -259,17 +259,27 @@ export default function Car({
         userData={userData}
         onCollisionEnter={onHit}
       >
-        {/* Rapier's DEFAULT active collision types omit kinematic↔kinematic
-            pair generation, so when the player car (kinematic-while-driven)
-            contacts an AI car (also kinematic) no contact pairs are created
-            and onCollisionEnter never fires. ALL enables every combination
-            (dynamic, kinematic, fixed) so we get events regardless of which
-            body types are in play. K↔K still doesn't *resolve* contacts —
-            disturb logic in DrivenCar handles that by switching the rammed
-            car to dynamic on the first event. */}
+        {/* Rapier's DEFAULT active collision types omit kinematic↔kinematic,
+            so the player car (kinematic-while-driven) and AI cars (always
+            kinematic) generate no contact pairs. We need K↔K events for
+            player rams, but enabling them on every car would also fire
+            for every AI car clipping another AI car at intersections —
+            those events run the self-damage code below and accumulate to
+            destruction within seconds, which is why traffic was driving
+            around on fire. Scope the opt-in to *just the driven car*: the
+            pair-merge rule is OR, so player↔AI fires (driven car has K↔K
+            enabled) but AI↔AI does not (neither has it). ALL also includes
+            KINEMATIC_FIXED, which we don't want — sticking to a hand-built
+            DEFAULT|KINEMATIC_KINEMATIC keeps the player car from receiving
+            ground/building enter events that would self-damage on curbs. */}
         <CuboidCollider
           args={CAR_COLLIDER_HALF}
-          activeCollisionTypes={ActiveCollisionTypes.ALL}
+          activeCollisionTypes={
+            isDriven
+              ? ActiveCollisionTypes.DEFAULT |
+                ActiveCollisionTypes.KINEMATIC_KINEMATIC
+              : ActiveCollisionTypes.DEFAULT
+          }
         />
         <GltfBoundary
           fallback={<PrimitiveCar color={activeColor} isDriven={isDriven} />}
