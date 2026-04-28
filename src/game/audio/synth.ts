@@ -21,6 +21,63 @@ function brownNoiseBuffer(ctx: AudioContext, seconds: number): AudioBuffer {
   return buf;
 }
 
+// Shared FX bus for splash + stroke. Keep this short and dark; obvious echoes
+// make close swimming read like a cave instead of open water.
+let _waterFxInput: GainNode | null = null;
+function getWaterFx(): AudioNode | null {
+  if (_waterFxInput) return _waterFxInput;
+  const ctx = getAudioContext();
+  const dest = getSfxNode();
+  if (!ctx || !dest) return null;
+
+  const decay = 0.18 + Math.random() * 0.12;
+  const len = Math.floor(ctx.sampleRate * decay);
+  const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = ir.getChannelData(ch);
+    for (let i = 0; i < len; i++) {
+      const t = i / len;
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 2);
+    }
+  }
+
+  const input = ctx.createGain();
+  input.gain.value = 1;
+
+  // Reverb branch - highpassed to keep the low rumble out of the wet tail.
+  const reverbHp = ctx.createBiquadFilter();
+  reverbHp.type = 'highpass';
+  reverbHp.frequency.value = 220;
+  const reverb = ctx.createConvolver();
+  reverb.buffer = ir;
+  const reverbGain = ctx.createGain();
+  reverbGain.gain.value = 0.18;
+  input.connect(reverbHp);
+  reverbHp.connect(reverb);
+  reverb.connect(reverbGain);
+  reverbGain.connect(dest);
+
+  // One faint early reflection gives width without a noticeable slap-back.
+  const delay = ctx.createDelay(0.35);
+  delay.delayTime.value = 0.055;
+  const feedback = ctx.createGain();
+  feedback.gain.value = 0.1;
+  const delayLp = ctx.createBiquadFilter();
+  delayLp.type = 'lowpass';
+  delayLp.frequency.value = 3600;
+  const delayGain = ctx.createGain();
+  delayGain.gain.value = 0.12;
+  input.connect(delay);
+  delay.connect(delayLp);
+  delayLp.connect(feedback);
+  feedback.connect(delay);
+  delayLp.connect(delayGain);
+  delayGain.connect(dest);
+
+  _waterFxInput = input;
+  return input;
+}
+
 export function playGunshot(kind: 'handgun' | 'shotgun' | 'smg') {
   resumeIfSuspended();
   const ctx = getAudioContext();
@@ -139,6 +196,178 @@ export function playFootstep() {
   g.connect(dest);
   src.start(t0);
   src.stop(t0 + duration);
+}
+
+// Splash on entering water. Replicates the rain synthesis recipe (low brown-
+// noise rumble + bandpassed-then-highpassed white-noise hiss, both at low Q)
+// but as a single short envelope-shaped burst. The rain layer in this file
+// is the project's reference for "natural water synthesis," so mimicking it
+// keeps the splash in the same sonic family instead of metallic ringing.
+export function playSplash() {
+  resumeIfSuspended();
+  const ctx = getAudioContext();
+  const dest = getSfxNode();
+  if (!ctx || !dest) return;
+  const fx = getWaterFx();
+
+  const t0 = ctx.currentTime;
+  const duration = 0.7;
+
+  // Rumble — same lowpass cutoff as rain's body (320 Hz) for the
+  // characteristic boomy underbelly.
+  const body = ctx.createBufferSource();
+  body.buffer = brownNoiseBuffer(ctx, duration);
+  const bodyLp = ctx.createBiquadFilter();
+  bodyLp.type = 'lowpass';
+  bodyLp.frequency.value = 320;
+  const bodyGain = ctx.createGain();
+  bodyGain.gain.setValueAtTime(0.0001, t0);
+  bodyGain.gain.exponentialRampToValueAtTime(0.6, t0 + 0.04);
+  bodyGain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+  body.connect(bodyLp);
+  bodyLp.connect(bodyGain);
+  bodyGain.connect(dest);
+  if (fx) bodyGain.connect(fx);
+  body.start(t0);
+  body.stop(t0 + duration);
+
+  // Hiss — same filter stack as rain (BP @ 2400/Q=0.7 → HP @ 1200) but
+  // gain-shaped into a burst. This is the layer that reads as "water," not
+  // "metal," because the broad bandpass + steep highpass kill the resonant
+  // peak you'd get from a higher-Q filter alone.
+  const hiss = ctx.createBufferSource();
+  hiss.buffer = noiseBuffer(ctx, duration);
+  const hissBp = ctx.createBiquadFilter();
+  hissBp.type = 'bandpass';
+  hissBp.frequency.value = 2400;
+  hissBp.Q.value = 0.7;
+  const hissHp = ctx.createBiquadFilter();
+  hissHp.type = 'highpass';
+  hissHp.frequency.value = 1200;
+  const hissGain = ctx.createGain();
+  hissGain.gain.setValueAtTime(0.0001, t0);
+  hissGain.gain.exponentialRampToValueAtTime(0.4, t0 + 0.025);
+  hissGain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+  hiss.connect(hissBp);
+  hissBp.connect(hissHp);
+  hissHp.connect(hissGain);
+  hissGain.connect(dest);
+  if (fx) hissGain.connect(fx);
+  hiss.start(t0);
+  hiss.stop(t0 + duration);
+}
+
+type SwimStrokeStyle = 'stroke' | 'tread';
+
+// Swim stroke: surface slap, body push, broken-up bubbles, and light droplets.
+// The tread variant keeps the same water character but removes the hard slap.
+export function playSwimStroke(style: SwimStrokeStyle = 'stroke') {
+  resumeIfSuspended();
+  const ctx = getAudioContext();
+  const dest = getSfxNode();
+  if (!ctx || !dest) return;
+  const fx = getWaterFx();
+
+  const t0 = ctx.currentTime;
+  const isStroke = style === 'stroke';
+  const power = isStroke ? 1 : 0.5;
+  const duration = isStroke ? 0.36 + Math.random() * 0.1 : 0.24 + Math.random() * 0.08;
+
+  const connectWet = (node: AudioNode, amount: number) => {
+    if (!fx) return;
+    const send = ctx.createGain();
+    send.gain.value = amount;
+    node.connect(send);
+    send.connect(fx);
+  };
+
+  if (isStroke || Math.random() < 0.35) {
+    const slapDuration = isStroke ? 0.14 : 0.08;
+    const slap = ctx.createBufferSource();
+    slap.buffer = noiseBuffer(ctx, slapDuration);
+    const slapHp = ctx.createBiquadFilter();
+    slapHp.type = 'highpass';
+    slapHp.frequency.value = 160;
+    const slapLp = ctx.createBiquadFilter();
+    slapLp.type = 'lowpass';
+    slapLp.frequency.value = 2600 + Math.random() * 1200;
+    const slapGain = ctx.createGain();
+    slapGain.gain.setValueAtTime(0.0001, t0);
+    slapGain.gain.exponentialRampToValueAtTime((0.28 + Math.random() * 0.08) * power, t0 + 0.005);
+    slapGain.gain.exponentialRampToValueAtTime(0.045 * power, t0 + 0.05);
+    slapGain.gain.exponentialRampToValueAtTime(0.0001, t0 + slapDuration);
+    slap.connect(slapHp);
+    slapHp.connect(slapLp);
+    slapLp.connect(slapGain);
+    slapGain.connect(dest);
+    connectWet(slapGain, isStroke ? 0.22 : 0.1);
+    slap.start(t0);
+    slap.stop(t0 + slapDuration);
+  }
+
+  // Low water displacement from the torso and kick.
+  const churn = ctx.createBufferSource();
+  churn.buffer = brownNoiseBuffer(ctx, duration);
+  const churnHp = ctx.createBiquadFilter();
+  churnHp.type = 'highpass';
+  churnHp.frequency.value = 75;
+  const churnLp = ctx.createBiquadFilter();
+  churnLp.type = 'lowpass';
+  churnLp.frequency.value = isStroke ? 520 + Math.random() * 180 : 360 + Math.random() * 120;
+  const churnGain = ctx.createGain();
+  churnGain.gain.setValueAtTime(0.0001, t0 + 0.01);
+  churnGain.gain.exponentialRampToValueAtTime((0.18 + Math.random() * 0.06) * power, t0 + 0.055);
+  churnGain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+  churn.connect(churnHp);
+  churnHp.connect(churnLp);
+  churnLp.connect(churnGain);
+  churnGain.connect(dest);
+  connectWet(churnGain, isStroke ? 0.12 : 0.08);
+  churn.start(t0);
+  churn.stop(t0 + duration);
+
+  const bubbleCount = isStroke ? 2 + Math.floor(Math.random() * 3) : 1 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < bubbleCount; i++) {
+    const at = t0 + 0.045 + Math.random() * (isStroke ? 0.18 : 0.1);
+    const bubbleDuration = 0.07 + Math.random() * 0.05;
+    const bubble = ctx.createBufferSource();
+    bubble.buffer = noiseBuffer(ctx, bubbleDuration);
+    const bubbleBp = ctx.createBiquadFilter();
+    bubbleBp.type = 'bandpass';
+    bubbleBp.frequency.value = 300 + Math.random() * 460;
+    bubbleBp.Q.value = 1.1 + Math.random() * 0.9;
+    const bubbleGain = ctx.createGain();
+    bubbleGain.gain.setValueAtTime(0.0001, at);
+    bubbleGain.gain.exponentialRampToValueAtTime((0.06 + Math.random() * 0.035) * power, at + 0.012);
+    bubbleGain.gain.exponentialRampToValueAtTime(0.0001, at + bubbleDuration);
+    bubble.connect(bubbleBp);
+    bubbleBp.connect(bubbleGain);
+    bubbleGain.connect(dest);
+    connectWet(bubbleGain, 0.1);
+    bubble.start(at);
+    bubble.stop(at + bubbleDuration);
+  }
+
+  const dropletCount = isStroke ? 2 + Math.floor(Math.random() * 3) : Math.floor(Math.random() * 2);
+  for (let i = 0; i < dropletCount; i++) {
+    const at = t0 + 0.06 + Math.random() * 0.2;
+    const droplet = ctx.createBufferSource();
+    droplet.buffer = noiseBuffer(ctx, 0.028);
+    const dropBp = ctx.createBiquadFilter();
+    dropBp.type = 'bandpass';
+    dropBp.frequency.value = 1800 + Math.random() * 2400;
+    dropBp.Q.value = 3;
+    const dropGain = ctx.createGain();
+    dropGain.gain.setValueAtTime(0.0001, at);
+    dropGain.gain.exponentialRampToValueAtTime((0.025 + Math.random() * 0.025) * power, at + 0.003);
+    dropGain.gain.exponentialRampToValueAtTime(0.0001, at + 0.028);
+    droplet.connect(dropBp);
+    dropBp.connect(dropGain);
+    dropGain.connect(dest);
+    connectWet(dropGain, 0.16);
+    droplet.start(at);
+    droplet.stop(at + 0.028);
+  }
 }
 
 export type AmbientHandle = { stop: () => void };

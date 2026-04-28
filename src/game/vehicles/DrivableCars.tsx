@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import DrivableCar from './DrivableCar';
 import { PARKING_SLOTS } from '@/game/world/cityLayout';
-import { pickCarVariantBySeed } from '@/game/world/cityAssets';
+import { pickCarVariantBySeed } from './vehicleIdentity';
 
 export const COLORS = ['#b04a3f', '#3f6cb0', '#3fa362', '#c9a23a', '#7a4ab0', '#444c5e'];
 // Cap physical drivable cars — every parking slot as a rigid body tanks frame

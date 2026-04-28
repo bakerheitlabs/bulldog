@@ -21,6 +21,7 @@ import { useInteractionKey } from './interactions/InteractionListener';
 import { startCityAmbient, type AmbientHandle } from './audio/synth';
 import { resumeIfSuspended } from './audio/soundEngine';
 import DrivableCars from './vehicles/DrivableCars';
+import SpawnedVehicles from './vehicles/SpawnedVehicles';
 import { useVehicleInteraction } from './vehicles/useVehicleInteraction';
 import {
   readDrivenCarPos,
@@ -77,6 +78,7 @@ function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () 
       <HospitalCounter />
       <MechanicShop />
       <DrivableCars paused={paused} />
+      <SpawnedVehicles paused={paused} />
       <Player ref={playerRef} paused={paused} />
       <MultiplayerProvider />
       <ThirdPersonCamera target={camTarget} />

@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import type { RapierRigidBody } from '@react-three/rapier';
-import type { CarVariant } from '@/game/world/cityAssets';
+import type { CarVariant } from './vehicleIdentity';
 import Car from './Car';
 
 type Props = {

@@ -46,12 +46,17 @@ const MOON_SKY_DISTANCE = 3000;
 const MOON_RADIUS = 90;
 const SUN_SKY_DISTANCE = 3000;
 const SUN_RADIUS = 110;
-// Bright near-white with a barely-there warm tint — close to how the real
-// sun reads from the ground at noon. Stays toneMapped=false on the material
-// so ACES doesn't pull the brightness down; the warm halo around the disc
-// (drawn separately via the rays texture + Drei's Sky shader) handles the
-// "yellower at the edges" feel.
-const SUN_BODY_COLOR = '#fffaeb';
+// Disc tints: pure white at zenith (so the disc reads as bright neutral
+// against the warm halo, not yellow), deep horizon orange when the sun dips
+// low. Lerped per-frame by `sunWarmth` so the disc reddens through dusk the
+// way real atmospheric scattering reddens it. Stays toneMapped=false on the
+// material so ACES doesn't pull the brightness down.
+const SUN_COLOR_HIGH = new THREE.Color('#ffffff');
+const SUN_COLOR_LOW = new THREE.Color('#ffdfc9');
+// Halo tints: white at noon (texture renders as-painted) → red-orange at the
+// horizon (multiplies the painted halo into a sunset wash).
+const HALO_TINT_HIGH = new THREE.Color('#ffffff');
+const HALO_TINT_LOW = new THREE.Color('#ff7028');
 // Halo plane extends past the sun disc so the soft glow radiates outward.
 // What you actually see around the sun in real life is atmospheric scattering
 // — a smooth halo that fades with distance — not discrete starburst rays.
@@ -176,9 +181,10 @@ function createSunTexture(): THREE.CanvasTexture {
   c.height = h;
   const ctx = c.getContext('2d')!;
 
-  // Very light warm-white base — multiplies with SUN_BODY_COLOR on the
-  // material; both kept near pure white so the disc reads as bright white.
-  ctx.fillStyle = '#fffbf094';
+  // Pure-white base (with the user's alpha tweak preserved) — combined with
+  // the dynamic disc color, the disc reads as neutral white at noon and the
+  // sunset warmth comes from the lerped material color, not the texture.
+  ctx.fillStyle = '#ffffff94';
   ctx.fillRect(0, 0, w, h);
 
   // Pure-white granules: tiny brightness lift so the surface isn't flat.
@@ -499,6 +505,25 @@ export default function DayNightLighting() {
   const sunTexture = useMemo(() => createSunTexture(), []);
   const sunRaysTexture = useMemo(() => createSunRaysTexture(), []);
 
+  // Warmth ramps from 0 (zenith) to 1 (horizon or below). Squared so the
+  // shift is subtle through midday and accelerates noticeably in the last
+  // hour before sunset — matches how real sunsets actually look.
+  const sunWarmth = useMemo(() => {
+    const t = 1 - Math.max(0, sun.height);
+    return t * t;
+  }, [sun.height]);
+  const sunDiscColor = useMemo(
+    () => SUN_COLOR_HIGH.clone().lerp(SUN_COLOR_LOW, sunWarmth),
+    [sunWarmth],
+  );
+  const haloTint = useMemo(
+    () => HALO_TINT_HIGH.clone().lerp(HALO_TINT_LOW, sunWarmth),
+    [sunWarmth],
+  );
+  // Sunset rays read more vivid than noon haze — bump halo brightness ~30%
+  // as the sun nears the horizon.
+  const haloOpacity = sunOpacity * (0.9 + 0.4 * sunWarmth);
+
   const lightRef = useRef<THREE.DirectionalLight>(null);
   // Keep the shadow frustum centered on the player. Reads the player position
   // imperatively so this doesn't subscribe to every store change.
@@ -562,9 +587,10 @@ export default function DayNightLighting() {
               <planeGeometry args={[SUN_RAYS_SIZE, SUN_RAYS_SIZE]} />
               <meshBasicMaterial
                 map={sunRaysTexture}
+                color={haloTint}
                 toneMapped={false}
                 transparent
-                opacity={sunOpacity * 0.9}
+                opacity={haloOpacity}
                 depthWrite={false}
                 blending={THREE.AdditiveBlending}
               />
@@ -574,7 +600,7 @@ export default function DayNightLighting() {
             <sphereGeometry args={[SUN_RADIUS, 32, 32]} />
             <meshBasicMaterial
               map={sunTexture}
-              color={SUN_BODY_COLOR}
+              color={sunDiscColor}
               toneMapped={false}
               transparent
               opacity={sunOpacity}

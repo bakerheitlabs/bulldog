@@ -9,7 +9,7 @@ import { Detailed } from '@react-three/drei';
 import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import { useGameStore } from '@/state/gameStore';
-import type { CarVariant } from '@/game/world/cityAssets';
+import type { CarVariant } from './vehicleIdentity';
 import GltfBoundary from '@/game/world/GltfBoundary';
 import CarModel from './CarModel';
 import CarSmoke, { isCarDestroyed, smokeColorForDamage } from './CarSmoke';

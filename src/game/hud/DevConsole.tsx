@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useGameStore } from '@/state/gameStore';
 import { WEAPONS } from '@/game/weapons/weapons';
 import { WEATHER_TYPES, type WeaponId, type WeatherType } from '@/save/schema';
-import { nearestLaneWaypoints } from '@/game/world/cityLayout';
+import { nearestLaneWaypoints, yawForLaneDir } from '@/game/world/cityLayout';
 import {
   TELEPORT_DESTINATIONS,
   isTeleportDestination,
@@ -10,6 +10,11 @@ import {
   resolveDestination,
 } from '@/game/world/teleport';
 import { useDebugTrafficStore } from '@/game/npcs/debugTrafficState';
+import { useSpawnedVehiclesStore } from '@/game/vehicles/spawnedVehiclesState';
+import {
+  VEHICLE_IDENTITY,
+  type VehicleIdentityKey,
+} from '@/game/vehicles/vehicleIdentity';
 import { tokens } from '@/ui/tokens';
 
 type Line = { kind: 'cmd' | 'ok' | 'err'; text: string };
@@ -23,6 +28,9 @@ const HELP = [
   'weather <type> [h]  sunny | cloudy | rain | storm; optional duration in hours',
   'traffic spawn [N]   spawn N debug AI cars near you (default 1, max 8)',
   'traffic clear       remove all debug AI cars',
+  'spawn <name>        spawn a drivable car next to you (e.g. floord_enforcer)',
+  'spawn list          list available vehicle names',
+  'spawn clear         remove all dev-spawned vehicles',
   `teleport <dest>     teleport to: ${TELEPORT_DESTINATIONS.join(' | ')}`,
   'help                show this list',
   'clear               clear console output',
@@ -45,6 +53,34 @@ function parseClock(s: string | undefined): number | null {
 
 function isWeaponId(s: string): s is WeaponId {
   return s in WEAPONS;
+}
+
+// Normalize a user-supplied vehicle name for fuzzy matching: lowercase and
+// strip everything but a-z0-9 so "Floord Enforcer", "floord_enforcer", and
+// "floord-enforcer" all collapse to "floordenforcer".
+function normalizeVehicleName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Match against variant key, brand+model, and the model alone — whichever
+// the user types. Returns null if nothing matches.
+function resolveVehicleName(name: string): VehicleIdentityKey | null {
+  const target = normalizeVehicleName(name);
+  if (!target) return null;
+  for (const key of Object.keys(VEHICLE_IDENTITY) as VehicleIdentityKey[]) {
+    if (normalizeVehicleName(key) === target) return key;
+    const id = VEHICLE_IDENTITY[key];
+    if (normalizeVehicleName(`${id.brand}${id.model}`) === target) return key;
+    if (normalizeVehicleName(id.model) === target) return key;
+  }
+  return null;
+}
+
+function listVehicleNames(): string[] {
+  return (Object.keys(VEHICLE_IDENTITY) as VehicleIdentityKey[]).map((key) => {
+    const id = VEHICLE_IDENTITY[key];
+    return `${id.brand.toLowerCase()}_${id.model.toLowerCase()}`;
+  });
 }
 
 function parseNumber(s: string | undefined): number | null {
@@ -162,6 +198,54 @@ function runCommand(raw: string): Line[] {
         ];
       }
       return [{ kind: 'err', text: 'usage: traffic spawn [N] | traffic clear' }];
+    }
+    case 'spawn': {
+      const sub = args[0]?.toLowerCase();
+      const spawned = useSpawnedVehiclesStore.getState();
+      if (sub === 'clear') {
+        spawned.clear();
+        return [{ kind: 'ok', text: 'cleared dev-spawned vehicles' }];
+      }
+      if (sub === 'list' || !sub) {
+        if (!sub) {
+          return [
+            { kind: 'err', text: 'usage: spawn <name> | spawn list | spawn clear' },
+            { kind: 'ok', text: `available: ${listVehicleNames().join(', ')}` },
+          ];
+        }
+        return [{ kind: 'ok', text: `available: ${listVehicleNames().join(', ')}` }];
+      }
+      const variant = resolveVehicleName(sub);
+      if (!variant) {
+        return [
+          { kind: 'err', text: `unknown vehicle "${sub}" — try "spawn list"` },
+        ];
+      }
+      const player = state.player.position;
+      // Use the nearest lane waypoint so the car spawns on a road and is
+      // already aligned with the lane direction. Skip waypoints within 6 m
+      // so it doesn't appear on top of the player.
+      const wps = nearestLaneWaypoints(
+        { x: player[0], z: player[2] },
+        1,
+        6,
+      );
+      if (wps.length === 0) {
+        return [{ kind: 'err', text: 'no nearby lane waypoint to spawn on' }];
+      }
+      const wp = wps[0];
+      spawned.spawn(
+        variant,
+        [wp.pos[0], 0, wp.pos[2]],
+        yawForLaneDir(wp.dir),
+      );
+      const id = VEHICLE_IDENTITY[variant];
+      return [
+        {
+          kind: 'ok',
+          text: `spawned ${id.brand} ${id.model} at ${wp.id} (${wp.pos[0].toFixed(0)}, ${wp.pos[2].toFixed(0)})`,
+        },
+      ];
     }
     case 'tp':
     case 'teleport': {

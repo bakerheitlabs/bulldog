@@ -6,7 +6,7 @@ import { useGameStore } from '@/state/gameStore';
 import { getHospitalRespawn, getPlayerSpawn } from '@/game/world/cityLayout';
 import { isOverLand, WATER_Y } from '@/game/world/landBounds';
 import { consumeTeleport, peekTeleport } from '@/game/world/teleport';
-import { playFootstep } from '@/game/audio/synth';
+import { playFootstep, playSplash, playSwimStroke } from '@/game/audio/synth';
 import {
   useVehicleStore,
   readDrivenCarPos,
@@ -26,9 +26,10 @@ import Parachute from './Parachute';
 
 const SPEED = 5;
 const SPRINT = 9;
-// Initial upward velocity on jump. ~5.5 m/s clears ~1.5m at g=9.81 — high
-// enough to hop a curb or bench, low enough that it doesn't read as a leap.
-const JUMP_SPEED = 5.5;
+// Initial upward velocity on jump. Paired with gravityScale=3.5 below this
+// gives ~2m of height and ~0.7s of airtime — snappy GTA-style hop, not a
+// moonwalk. Game gravity beats Earth gravity for jump feel.
+const JUMP_SPEED = 12;
 // Grounded check: player capsule sits with feet at ~y=0 when standing on the
 // road plane (capsule center at 0.9m). Treat anything within this margin of
 // the resting Y velocity as "on a surface" so jump is reliable on slopes.
@@ -76,6 +77,9 @@ const POSE_LERP_RATE = 8;
 // reads as buoyant rather than nailed in place.
 const TREAD_BOB_HZ = 0.5;
 const TREAD_BOB_AMP = 0.04;
+const SWIM_STROKE_INTERVAL = 0.5;
+const SWIM_PADDLE_INTERVAL = 0.72;
+const SWIM_TREAD_INTERVAL = 1.2;
 // Stable references — @react-three/rapier reapplies every mutable RigidBody
 // prop (including `type` AND `position`) when any of them changes by ref.
 // A fresh object/array each render would override the manual setBodyType we
@@ -118,6 +122,11 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
   // Swimming: tracked as a ref so the hysteresis check inside useFrame stays
   // stable across frames without forcing a re-render every transition.
   const swimmingRef = useRef(false);
+  // Scheduled swim SFX cadence. Time-based sounds better than distance-gated
+  // here because a player still splashes while paddling in place or into a
+  // beach edge.
+  const nextSwimSoundAt = useRef(0);
+  const swimIntentRef = useRef(false);
   // Edge-detect Space so holding it doesn't repeatedly fire jumps the moment
   // the player lands.
   const jumpHeldRef = useRef(false);
@@ -348,12 +357,20 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
     // below the water line.
     const pos = rigid.current.translation();
     const overLand = isOverLand(pos.x, pos.z);
+    const wasSwimming = swimmingRef.current;
     if (swimmingRef.current) {
       if (overLand || pos.y > SWIM_EXIT_Y) swimmingRef.current = false;
     } else {
       if (!overLand && pos.y < SWIM_ENTER_Y) swimmingRef.current = true;
     }
     const swimming = swimmingRef.current;
+    // Splash on the moment of water entry — false→true transition.
+    const enteredWater = swimming && !wasSwimming;
+    if (enteredWater) {
+      playSplash();
+      nextSwimSoundAt.current = state.clock.elapsedTime + (dir.lengthSq() > 0 ? 0.25 : 0.85);
+      swimIntentRef.current = dir.lengthSq() > 0;
+    }
 
     const linvel = rigid.current.linvel();
     if (swimming) {
@@ -449,6 +466,39 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
         stepAccum.current = Math.min(stepAccum.current, 1.2);
       }
     }
+
+    if (swimming) {
+      const now = state.clock.elapsedTime;
+      const swimIntent = dir.lengthSq() > 0;
+      if (swimIntent && !swimIntentRef.current) {
+        const soon = now + 0.08;
+        nextSwimSoundAt.current =
+          nextSwimSoundAt.current > 0 ? Math.min(nextSwimSoundAt.current, soon) : soon;
+      }
+      if (nextSwimSoundAt.current <= 0) {
+        nextSwimSoundAt.current = now + (swimIntent ? 0.12 : 0.75);
+      }
+      if (now >= nextSwimSoundAt.current) {
+        const fullStroke = proneSwim && swimIntent;
+        playSwimStroke(fullStroke ? 'stroke' : 'tread');
+        const base = fullStroke
+          ? SWIM_STROKE_INTERVAL
+          : swimIntent
+            ? SWIM_PADDLE_INTERVAL
+            : SWIM_TREAD_INTERVAL;
+        const jitter = fullStroke
+          ? Math.random() * 0.14
+          : swimIntent
+            ? Math.random() * 0.22
+            : Math.random() * 0.45;
+        nextSwimSoundAt.current = now + base + jitter;
+      }
+      swimIntentRef.current = swimIntent;
+    } else {
+      nextSwimSoundAt.current = 0;
+      swimIntentRef.current = false;
+    }
+
     if (!lastPos.current) lastPos.current = { x: t.x, z: t.z };
     else {
       lastPos.current.x = t.x;
@@ -463,8 +513,10 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
       enabledRotations={PLAYER_ENABLED_ROTATIONS}
       position={spawn.current}
       mass={1}
-      linearDamping={4}
+      linearDamping={0}
       angularDamping={4}
+      gravityScale={3.5}
+      ccd
       type="dynamic"
       userData={PLAYER_USER_DATA}
     >

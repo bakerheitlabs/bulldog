@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useCityModel, useFitLength, type CarVariant } from '@/game/world/cityAssets';
+import { useCityModel, useFitLength } from '@/game/world/cityAssets';
+import type { CarVariant } from './vehicleIdentity';
 
 const TARGET_LENGTH = 4;
 
@@ -95,7 +96,20 @@ export default function CarModel({
     // the wheel in place. Some kits (Police Car) have wheel meshes whose
     // local origin isn't at the wheel center, which is why the pivot is
     // necessary rather than rotating the mesh directly.
-    scene.updateMatrixWorld(true);
+    //
+    // Crucial: walk the ancestor chain (`updateWorldMatrix(true, …)`),
+    // not just descendants (`updateMatrixWorld(true)`). At effect time the
+    // RigidBody's wrapper matrix isn't yet rolled up into scene.matrixWorld,
+    // so `setFromObject` on the FIRST wheel target produces a bbox in
+    // scene-local coords while later targets land in world coords (something
+    // — likely a downstream `add(...)` triggering R3F bookkeeping — refreshes
+    // the chain mid-loop). The pivot for the first target then gets placed
+    // at parent.worldToLocal(scene-local-bbox-center) which is meters away
+    // from the actual wheel, and at any non-zero spin angle the wheel orbits
+    // wildly around the car. Forcing the parent chain fresh up front, plus
+    // re-asserting on every iteration, keeps every iteration's bbox and
+    // worldToLocal in the same frame.
+    scene.updateWorldMatrix(true, true);
     const wheels: WheelEntry[] = [];
     const worldCenter = new THREE.Vector3();
     const worldSize = new THREE.Vector3();
@@ -138,11 +152,37 @@ export default function CarModel({
       // spare is just `wheel-back` — no side, no plural — so this filter
       // skips it and keeps it visually static.
       if (!/(left|right)/i.test(obj.name) && !/wheels/i.test(obj.name)) return;
+      // Skip auto-generated children of multi-primitive wheel nodes.
+      // GLTFLoader splits a mesh with N primitives into a Group with N
+      // child Meshes, and the children inherit the node name — so the
+      // filter above matches the parent AND each child. Wrapping both in
+      // spin pivots stacks rotations against the merged-axle bbox center
+      // (which sits between the two physical wheels for plural axles like
+      // Cop_BackWheels), and the wheels orbit the car instead of spinning.
+      let anc: THREE.Object3D | null = obj.parent;
+      let nestedUnderWheel = false;
+      while (anc && anc !== scene) {
+        if (/wheel/i.test(anc.name)) {
+          nestedUnderWheel = true;
+          break;
+        }
+        anc = anc.parent;
+      }
+      if (nestedUnderWheel) return;
       targets.push(obj);
     });
     for (const obj of targets) {
       const parent = obj.parent;
       if (!parent) continue;
+      // Re-assert the ancestor chain freshness before each iteration.
+      // The previous iteration's `parent.add(pivot)` / `pivot.add(obj)`
+      // mutations can perturb cached matrixWorld for some hierarchies, and
+      // setFromObject's internal `updateWorldMatrix(false, false)` only
+      // reads the cached parent.matrixWorld — it doesn't walk up. Without
+      // this, the first iteration's bbox lands in a different frame than
+      // its worldToLocal (see comment on the `updateWorldMatrix` call
+      // above).
+      parent.updateWorldMatrix(true, false);
       const wbox = new THREE.Box3().setFromObject(obj);
       wbox.getCenter(worldCenter);
       wbox.getSize(worldSize);

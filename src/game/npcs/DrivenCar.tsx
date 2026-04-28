@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import type { RapierRigidBody } from '@react-three/rapier';
 import { yawForLaneDir } from '@/game/world/cityLayout';
 import { LANE_WAYPOINTS } from '@/game/world/worldWaypoints';
-import { pickCarVariantBySeed, VEHICLE_IDENTITY } from '@/game/world/cityAssets';
+import { pickCarVariantBySeed, VEHICLE_IDENTITY } from '@/game/vehicles/vehicleIdentity';
 import Car from '@/game/vehicles/Car';
 import EjectedDriver from '@/game/vehicles/EjectedDriver';
 import { useVehicleStore } from '@/game/vehicles/vehicleState';

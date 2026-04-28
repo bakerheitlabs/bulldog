@@ -3,7 +3,7 @@
 // uniformly to parked, traffic, and police cars.
 
 // Fallback top speed used when no per-variant value is supplied. Real
-// per-car limits live on `VehicleIdentity.topSpeed` in cityAssets.ts.
+// per-car limits live on `VehicleIdentity.topSpeed` in vehicleIdentity.ts.
 export const MAX_SPEED = 24;
 export const REVERSE_SPEED = 8;
 export const ACCEL = 13;

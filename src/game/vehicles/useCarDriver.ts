@@ -12,7 +12,7 @@ import {
 import { vehicleRunOver } from '@/game/npcs/npcRegistry';
 import { snapCameraYawBehind } from '@/game/player/cameraState';
 import { useKeyboard } from '@/game/player/useKeyboard';
-import { VEHICLE_IDENTITY, type VehicleIdentityKey } from '@/game/world/cityAssets';
+import { VEHICLE_IDENTITY, type VehicleIdentityKey } from './vehicleIdentity';
 import {
   RUN_OVER_DAMAGE,
   RUN_OVER_RADIUS,
