@@ -164,6 +164,104 @@ export function playReload() {
   clickAt(0.12, 1600);
 }
 
+// Pitches for a small "set" of bells in the tower. An E major triad (E4 /
+// G#4 / B4) — three notes that ring harmoniously when alternated, so a
+// chime sequence reads as a tuned carillon rather than one bell repeating.
+// Exported so the chime scheduler can pass a specific pitch per strike.
+export const CHURCH_BELL_NOTES = [329.63, 415.3, 493.88] as const; // E4, G#4, B4
+
+// Church bell strike. Synthesizes a single strike using non-integer harmonic
+// partials at the ratios real cast bells produce: hum (½×), prime (1×),
+// minor third / tierce (1.2×), quint (1.5×), nominal (2×), twelfth (3×),
+// double octave (4×), and a high sparkle (5.33×). The 1.2× tierce is what
+// gives bells their characteristic "minor key" tonality. A short bandpassed
+// noise burst at the start adds the strike transient. Optional position
+// spatializes the sound through a PannerNode so distance falloff matches
+// the player's position relative to the church. Optional `pitch` overrides
+// the default fundamental (E4) so successive strikes can voice different
+// bells in the set.
+export function playChurchBell(opts?: {
+  x?: number;
+  y?: number;
+  z?: number;
+  pitch?: number;
+}) {
+  resumeIfSuspended();
+  const ctx = getAudioContext();
+  const dest = getSfxNode();
+  if (!ctx || !dest) return;
+
+  const t0 = ctx.currentTime;
+  // Default to E4 — bright enough to read as a tower bell, low enough to
+  // still feel weighty. Caller can pass a different pitch from the bell set.
+  const fundamental = opts?.pitch ?? CHURCH_BELL_NOTES[0];
+
+  // Output bus: connect to a panner if we got a position, otherwise direct.
+  const out = ctx.createGain();
+  out.gain.value = 0.7;
+  if (opts && (opts.x !== undefined || opts.z !== undefined)) {
+    const panner = ctx.createPanner();
+    panner.panningModel = 'HRTF';
+    panner.distanceModel = 'inverse';
+    panner.refDistance = 60;
+    panner.maxDistance = 1500;
+    panner.rolloffFactor = 1.2;
+    panner.positionX.value = opts.x ?? 0;
+    panner.positionY.value = opts.y ?? 0;
+    panner.positionZ.value = opts.z ?? 0;
+    out.connect(panner);
+    panner.connect(dest);
+  } else {
+    out.connect(dest);
+  }
+
+  // Strike transient — high-frequency noise burst at the moment of impact.
+  // Higher BP center than before for a brighter "clack" against the bronze.
+  const strike = ctx.createBufferSource();
+  strike.buffer = noiseBuffer(ctx, 0.08);
+  const strikeBp = ctx.createBiquadFilter();
+  strikeBp.type = 'bandpass';
+  strikeBp.frequency.value = 5000;
+  strikeBp.Q.value = 1.5;
+  const strikeGain = ctx.createGain();
+  strikeGain.gain.setValueAtTime(0.001, t0);
+  strikeGain.gain.exponentialRampToValueAtTime(0.22, t0 + 0.004);
+  strikeGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.08);
+  strike.connect(strikeBp);
+  strikeBp.connect(strikeGain);
+  strikeGain.connect(out);
+  strike.start(t0);
+  strike.stop(t0 + 0.08);
+
+  // Bell partials. Upper partials (nominal, twelfth, double octave, sparkle)
+  // boosted in level AND extended in decay versus a typical "deep bell" — that
+  // sustained brightness is what reads as a tower bell ringing rather than a
+  // muffled gong. Hum kept low so it doesn't muddy the sound.
+  const partials: { ratio: number; peak: number; decay: number }[] = [
+    { ratio: 0.5, peak: 0.15, decay: 4.5 }, // hum — quieter than before
+    { ratio: 1.0, peak: 0.32, decay: 3.5 }, // prime
+    { ratio: 1.2, peak: 0.26, decay: 3.0 }, // tierce — minor-third bell character
+    { ratio: 1.5, peak: 0.22, decay: 2.5 }, // quint
+    { ratio: 2.0, peak: 0.42, decay: 3.0 }, // nominal — perceived strike pitch
+    { ratio: 3.0, peak: 0.28, decay: 2.0 }, // twelfth — boosted for brightness
+    { ratio: 4.0, peak: 0.18, decay: 1.4 }, // double octave — boosted
+    { ratio: 5.33, peak: 0.08, decay: 0.6 }, // sparkle — high partial for shimmer
+  ];
+  for (const p of partials) {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = fundamental * p.ratio;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.001, t0);
+    g.gain.exponentialRampToValueAtTime(p.peak, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + p.decay);
+    osc.connect(g);
+    g.connect(out);
+    osc.start(t0);
+    osc.stop(t0 + p.decay);
+  }
+}
+
 export function playFootstep() {
   resumeIfSuspended();
   const ctx = getAudioContext();

@@ -1,4 +1,5 @@
 import { SAVE_VERSION, type SaveData } from './schema';
+import { STOCKS } from '@/game/world/stocks';
 
 type Migration = (raw: any) => any;
 
@@ -31,6 +32,41 @@ const MIGRATIONS: Record<number, Migration> = {
       weather: { type: 'sunny' },
     },
   }),
+  4: (raw) => ({
+    ...raw,
+    version: 5,
+    game: {
+      ...raw.game,
+      time: {
+        seconds: raw.game?.time?.seconds ?? 8 * 3600,
+        // Halloween 2020 (Saturday) — game start date introduced with v5.
+        year: 2020,
+        month: 10,
+        day: 31,
+      },
+    },
+  }),
+  5: (raw) => {
+    const prices: Record<string, { price: number; history: number[] }> = {};
+    for (const s of STOCKS) {
+      prices[s.symbol] = { price: s.basePrice, history: [s.basePrice] };
+    }
+    return {
+      ...raw,
+      version: 6,
+      game: {
+        ...raw.game,
+        stocks: {
+          prices,
+          holdings: {},
+          elapsedSinceLastTick: 0,
+          // Each save gets its own price walk. Same range as the weather
+          // schedule's seed (`(Math.random() * 0x7fffffff) >>> 0`).
+          rngState: (Math.random() * 0x7fffffff) >>> 0,
+        },
+      },
+    };
+  },
 };
 
 export function migrate(raw: any): SaveData {

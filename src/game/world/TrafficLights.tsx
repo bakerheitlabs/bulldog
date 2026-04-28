@@ -2,11 +2,12 @@ import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
-  INTERSECTIONS,
+  getAllCityGrids,
   lightPostPos,
   type Intersection,
   type LaneDir,
 } from './cityLayout';
+import './island3'; // side-effect: registers ISLAND3_CITY
 import { useCityModel, useFitHeight } from './cityAssets';
 import GltfBoundary from './GltfBoundary';
 import { lightFor, tickTrafficClock, type Light } from './trafficLightState';
@@ -223,11 +224,13 @@ function TrafficLightPost({ intersection, dir }: { intersection: Intersection; d
   );
 }
 
+const ALL_INTERSECTIONS: Intersection[] = getAllCityGrids().flatMap((g) => g.intersections);
+
 export default function TrafficLights() {
   useFrame((_, dt) => tickTrafficClock(dt));
   const visible = useVisibleCells();
-  const visibleIntersections = INTERSECTIONS.filter((it) =>
-    visible.some((v) => v.col === it.col && v.row === it.row),
+  const visibleIntersections = ALL_INTERSECTIONS.filter((it) =>
+    visible.some((v) => v.gridId === it.gridId && v.col === it.col && v.row === it.row),
   );
   return (
     <group>

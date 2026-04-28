@@ -6,6 +6,14 @@ import {
   mulberry32,
   type WeatherSpell,
 } from '@/game/world/weatherForecast';
+import { advanceDate, type GameDate } from '@/game/world/gameDate';
+import {
+  STOCKS,
+  HISTORY_LEN,
+  TICK_INTERVAL_GAME_SEC,
+  PRICE_FLOOR,
+  randomWalkStep,
+} from '@/game/world/stocks';
 
 const PLAYER_START_POS: [number, number, number] = [0, 1, 0];
 const STARTING_MONEY = 1500;
@@ -44,6 +52,17 @@ type GameState = GameStoreSnapshot & {
   tickWanted: (deltaMs: number) => void;
   tickWorldTime: (deltaMs: number) => void;
   setWorldTimeSeconds: (seconds: number) => void;
+  setWorldDate: (date: GameDate) => void;
+  // Stocks: host-side price simulation and player trades.
+  tickStocks: (gameSeconds: number) => void;
+  buyStock: (symbol: string, shares: number) => { ok: boolean; reason?: string };
+  sellStock: (symbol: string, shares: number) => { ok: boolean; reason?: string };
+  // MP-client path: replace prices from a host snapshot, appending to history
+  // only when the price actually changed.
+  setStockPrices: (next: Record<string, number>) => void;
+  // External hook for in-game events to nudge a single stock (e.g. plane crash
+  // → applyStockEvent('KMRA', 0.85) for an instant -15%).
+  applyStockEvent: (symbol: string, multiplier: number) => void;
   setWeather: (type: WeatherType) => void;
   // Replace the current spell with a custom override. Upcoming spells are
   // left intact so the regular schedule resumes once the override expires.
@@ -69,6 +88,8 @@ const HEAT_COOLDOWN_MS = 4000;
 export const WORLD_TIME_RATE = 30;
 export const SECONDS_PER_DAY = 24 * 3600;
 const WORLD_TIME_START = 8 * 3600;
+// Halloween 2020 — Saturday. Set as the in-world starting date.
+export const WORLD_DATE_START: GameDate = { year: 2020, month: 10, day: 31 };
 
 function wrapSeconds(s: number): number {
   const n = s % SECONDS_PER_DAY;
@@ -89,6 +110,19 @@ function freshSchedule(seedType?: WeatherType): WeatherSchedule {
   return { current, upcoming, elapsedSec: 0 };
 }
 
+function initialStocks(): GameStoreSnapshot['stocks'] {
+  const prices: Record<string, { price: number; history: number[] }> = {};
+  for (const s of STOCKS) {
+    prices[s.symbol] = { price: s.basePrice, history: [s.basePrice] };
+  }
+  return {
+    prices,
+    holdings: {},
+    elapsedSinceLastTick: 0,
+    rngState: (Math.random() * 0x7fffffff) >>> 0,
+  };
+}
+
 function initialSnapshot(): GameStoreSnapshot {
   return {
     player: {
@@ -104,8 +138,9 @@ function initialSnapshot(): GameStoreSnapshot {
     },
     world: { destroyedTargets: [] },
     wanted: { heat: 0, lastCrimeAt: 0 },
-    time: { seconds: WORLD_TIME_START },
+    time: { seconds: WORLD_TIME_START, ...WORLD_DATE_START },
     weather: { type: 'sunny' },
+    stocks: initialStocks(),
     meta: { startedAt: Date.now(), playtimeMs: 0 },
   };
 }
@@ -131,6 +166,19 @@ export const useGameStore = create<GameState>((set, get) => ({
       wanted: { ...s.wanted },
       time: { ...s.time },
       weather: { ...s.weather },
+      stocks: {
+        prices: Object.fromEntries(
+          Object.entries(s.stocks.prices).map(([k, v]) => [
+            k,
+            { price: v.price, history: [...v.history] },
+          ]),
+        ),
+        holdings: Object.fromEntries(
+          Object.entries(s.stocks.holdings).map(([k, v]) => [k, { ...v }]),
+        ),
+        elapsedSinceLastTick: s.stocks.elapsedSinceLastTick,
+        rngState: s.stocks.rngState,
+      },
       meta: { ...s.meta },
     };
   },
@@ -216,11 +264,141 @@ export const useGameStore = create<GameState>((set, get) => ({
       return { wanted: { ...s.wanted, heat: next } };
     }),
   tickWorldTime: (deltaMs) =>
-    set((s) => ({
-      time: { seconds: wrapSeconds(s.time.seconds + (deltaMs / 1000) * WORLD_TIME_RATE) },
-    })),
+    set((s) => {
+      const raw = s.time.seconds + (deltaMs / 1000) * WORLD_TIME_RATE;
+      const daysAdvanced = Math.floor(raw / SECONDS_PER_DAY);
+      const seconds = wrapSeconds(raw);
+      if (daysAdvanced <= 0) return { time: { ...s.time, seconds } };
+      const next = advanceDate(
+        { year: s.time.year, month: s.time.month, day: s.time.day },
+        daysAdvanced,
+      );
+      return { time: { seconds, ...next } };
+    }),
   setWorldTimeSeconds: (seconds) =>
-    set(() => ({ time: { seconds: wrapSeconds(seconds) } })),
+    set((s) => ({ time: { ...s.time, seconds: wrapSeconds(seconds) } })),
+  setWorldDate: (date) =>
+    set((s) => ({ time: { ...s.time, year: date.year, month: date.month, day: date.day } })),
+  tickStocks: (gameSeconds) =>
+    set((s) => {
+      if (gameSeconds <= 0) return {};
+      let elapsed = s.stocks.elapsedSinceLastTick + gameSeconds;
+      // Drain loop — a long tab-defocus or pause should advance multiple
+      // ticks rather than dropping them, mirroring tickWeather.
+      if (elapsed < TICK_INTERVAL_GAME_SEC) {
+        return { stocks: { ...s.stocks, elapsedSinceLastTick: elapsed } };
+      }
+      let rngState = s.stocks.rngState;
+      // Clone prices so we mutate a fresh map; histories are arrays we extend.
+      const prices: Record<string, { price: number; history: number[] }> = {};
+      for (const [sym, entry] of Object.entries(s.stocks.prices)) {
+        prices[sym] = { price: entry.price, history: [...entry.history] };
+      }
+      while (elapsed >= TICK_INTERVAL_GAME_SEC) {
+        elapsed -= TICK_INTERVAL_GAME_SEC;
+        for (const stock of STOCKS) {
+          const cur = prices[stock.symbol];
+          if (!cur) continue;
+          const step = randomWalkStep(cur.price, stock.volatility, rngState);
+          rngState = step.state;
+          cur.price = step.price;
+          cur.history.push(step.price);
+          if (cur.history.length > HISTORY_LEN) {
+            cur.history.splice(0, cur.history.length - HISTORY_LEN);
+          }
+        }
+      }
+      return {
+        stocks: {
+          ...s.stocks,
+          prices,
+          rngState,
+          elapsedSinceLastTick: elapsed,
+        },
+      };
+    }),
+  buyStock: (symbol, shares) => {
+    if (!Number.isInteger(shares) || shares <= 0) {
+      return { ok: false, reason: 'shares must be a positive integer' };
+    }
+    const s = get();
+    const entry = s.stocks.prices[symbol];
+    if (!entry) return { ok: false, reason: `unknown symbol: ${symbol}` };
+    const cost = entry.price * shares;
+    if (s.player.money < cost) return { ok: false, reason: 'insufficient funds' };
+    const cur = s.stocks.holdings[symbol] ?? { shares: 0, avgCost: 0 };
+    const total = cur.shares + shares;
+    const avgCost = (cur.avgCost * cur.shares + entry.price * shares) / total;
+    set({
+      player: { ...s.player, money: s.player.money - cost },
+      stocks: {
+        ...s.stocks,
+        holdings: { ...s.stocks.holdings, [symbol]: { shares: total, avgCost } },
+      },
+    });
+    return { ok: true };
+  },
+  sellStock: (symbol, shares) => {
+    if (!Number.isInteger(shares) || shares <= 0) {
+      return { ok: false, reason: 'shares must be a positive integer' };
+    }
+    const s = get();
+    const entry = s.stocks.prices[symbol];
+    if (!entry) return { ok: false, reason: `unknown symbol: ${symbol}` };
+    const cur = s.stocks.holdings[symbol];
+    if (!cur || cur.shares < shares) {
+      return { ok: false, reason: 'not enough shares' };
+    }
+    const proceeds = entry.price * shares;
+    const remaining = cur.shares - shares;
+    // Hard-zero the entry on a full sell so callers can stop checking
+    // shares > 0 before reading avgCost.
+    const nextHolding = remaining === 0 ? { shares: 0, avgCost: 0 } : { shares: remaining, avgCost: cur.avgCost };
+    set({
+      player: { ...s.player, money: s.player.money + proceeds },
+      stocks: {
+        ...s.stocks,
+        holdings: { ...s.stocks.holdings, [symbol]: nextHolding },
+      },
+    });
+    return { ok: true };
+  },
+  setStockPrices: (next) =>
+    set((s) => {
+      const prices: Record<string, { price: number; history: number[] }> = {};
+      let changed = false;
+      for (const [sym, entry] of Object.entries(s.stocks.prices)) {
+        const incoming = next[sym];
+        if (incoming == null || incoming === entry.price) {
+          prices[sym] = entry;
+          continue;
+        }
+        const history = [...entry.history, incoming];
+        if (history.length > HISTORY_LEN) {
+          history.splice(0, history.length - HISTORY_LEN);
+        }
+        prices[sym] = { price: incoming, history };
+        changed = true;
+      }
+      if (!changed) return {};
+      return { stocks: { ...s.stocks, prices } };
+    }),
+  applyStockEvent: (symbol, multiplier) =>
+    set((s) => {
+      const entry = s.stocks.prices[symbol];
+      if (!entry || !Number.isFinite(multiplier) || multiplier <= 0) return {};
+      const next = Math.max(PRICE_FLOOR, entry.price * multiplier);
+      const history = [...entry.history, next];
+      if (history.length > HISTORY_LEN) {
+        history.splice(0, history.length - HISTORY_LEN);
+      }
+      return {
+        stocks: {
+          ...s.stocks,
+          prices: { ...s.stocks.prices, [symbol]: { price: next, history } },
+        },
+      };
+    }),
   setWeather: (type) =>
     set((s) => {
       if (s.weather.type === type) return {};

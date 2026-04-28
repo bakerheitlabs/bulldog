@@ -9,6 +9,7 @@ import {
   requestTeleport,
   resolveDestination,
 } from '@/game/world/teleport';
+import { isValidDate, type GameDate } from '@/game/world/gameDate';
 import { useDebugTrafficStore } from '@/game/npcs/debugTrafficState';
 import { useSpawnedVehiclesStore } from '@/game/vehicles/spawnedVehiclesState';
 import {
@@ -24,7 +25,7 @@ const HELP = [
   'ammo <weapon> N     set reserve ammo (weapons: handgun, shotgun, smg)',
   'godmode             toggle unlimited health + ammo',
   'wanted 0-5          set wanted stars',
-  'time HH:MM          set world clock (24-hour)',
+  'time [YYYY-MM-DD] [HH:MM]   set world date and/or clock (24-hour)',
   'weather <type> [h]  sunny | cloudy | rain | storm; optional duration in hours',
   'traffic spawn [N]   spawn N debug AI cars near you (default 1, max 8)',
   'traffic clear       remove all debug AI cars',
@@ -49,6 +50,18 @@ function parseClock(s: string | undefined): number | null {
   if (!Number.isFinite(h) || !Number.isFinite(min)) return null;
   if (h < 0 || h > 23 || min < 0 || min > 59) return null;
   return h * 3600 + min * 60;
+}
+
+function parseDate(s: string | undefined): GameDate | null {
+  if (!s) return null;
+  const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!m) return null;
+  const date: GameDate = {
+    year: Number(m[1]),
+    month: Number(m[2]),
+    day: Number(m[3]),
+  };
+  return isValidDate(date) ? date : null;
 }
 
 function isWeaponId(s: string): s is WeaponId {
@@ -131,12 +144,37 @@ function runCommand(raw: string): Line[] {
       return [{ kind: 'ok', text: `wanted → ${Math.max(0, Math.min(5, Math.round(n)))} ★` }];
     }
     case 'time': {
-      const sec = parseClock(args[0]);
-      if (sec == null) return [{ kind: 'err', text: 'usage: time HH:MM (24-hour)' }];
-      state.setWorldTimeSeconds(sec);
-      const hh = Math.floor(sec / 3600).toString().padStart(2, '0');
-      const mm = Math.floor((sec % 3600) / 60).toString().padStart(2, '0');
-      return [{ kind: 'ok', text: `time → ${hh}:${mm}` }];
+      // Accepts: time HH:MM | time YYYY-MM-DD | time YYYY-MM-DD HH:MM
+      let date: GameDate | null = null;
+      let sec: number | null = null;
+      for (const arg of args.slice(0, 2)) {
+        const d = parseDate(arg);
+        if (d) {
+          if (date) return [{ kind: 'err', text: 'time: date specified twice' }];
+          date = d;
+          continue;
+        }
+        const t = parseClock(arg);
+        if (t != null) {
+          if (sec != null) return [{ kind: 'err', text: 'time: clock specified twice' }];
+          sec = t;
+          continue;
+        }
+        return [
+          { kind: 'err', text: `time: unrecognized argument "${arg}"` },
+          { kind: 'err', text: 'usage: time [YYYY-MM-DD] [HH:MM]' },
+        ];
+      }
+      if (date == null && sec == null) {
+        return [{ kind: 'err', text: 'usage: time [YYYY-MM-DD] [HH:MM]' }];
+      }
+      if (date) state.setWorldDate(date);
+      if (sec != null) state.setWorldTimeSeconds(sec);
+      const t = useGameStore.getState().time;
+      const hh = Math.floor(t.seconds / 3600).toString().padStart(2, '0');
+      const mm = Math.floor((t.seconds % 3600) / 60).toString().padStart(2, '0');
+      const ymd = `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
+      return [{ kind: 'ok', text: `time → ${ymd} ${hh}:${mm}` }];
     }
     case 'weather': {
       const w = args[0]?.toLowerCase();

@@ -4,18 +4,23 @@
 // noise, and Player.tsx already runs every frame anyway.
 
 import { findCellByTag, getPlayerSpawn, type Vec3 } from './cityLayout';
+import { ISLAND3_CITY } from './island3';
 import { AIRPORTS } from './splineRegions';
 import { DOCK_ENTRY } from './Dock';
 
 export const TELEPORT_DESTINATIONS = [
   'airport',
   'island2',
+  'island3',
   'dock',
   'hospital',
   'gunstore',
   'gun_store',
   'mechanic',
   'range',
+  'church',
+  'stadium',
+  'marina',
   'spawn',
 ] as const;
 
@@ -41,12 +46,30 @@ export function resolveDestination(name: TeleportDestination): Vec3 | null {
     const lot = AIRPORTS[1].parkingLot;
     return [lot.centerX, 1, lot.centerZ];
   }
+  if (name === 'island3') {
+    // Drop the player on a sidewalk near island 3's stadium block.
+    const stadium = ISLAND3_CITY.findCellByTag('stadium');
+    if (stadium) {
+      const [x, , z] = stadium.center;
+      return [x + stadium.size.width / 2 + 2, 1, z];
+    }
+    // Fallback: bridge entry on island 3 side.
+    const c = ISLAND3_CITY.cellCenter(1, 5);
+    return [c[0], 1, c[2]];
+  }
   if (name === 'dock') {
     // Land-side foot of the pier on the main island's north shore.
     return DOCK_ENTRY;
   }
-  // Tagged grid landmarks: re-use the same "stand on the east-face sidewalk"
-  // formula as getPlayerSpawn / getHospitalRespawn.
+  // Island 3 landmarks first (stadium / marina live there).
+  if (name === 'stadium' || name === 'marina') {
+    const info = ISLAND3_CITY.findCellByTag(name);
+    if (!info) return null;
+    const [x, , z] = info.center;
+    return [x + info.size.width / 2 + 2, 1, z];
+  }
+  // Tagged grid landmarks on the main island: re-use the same
+  // "stand on the east-face sidewalk" formula as getPlayerSpawn.
   const tag =
     name === 'gunstore' || name === 'gun_store'
       ? 'gunstore'
@@ -54,7 +77,9 @@ export function resolveDestination(name: TeleportDestination): Vec3 | null {
         ? 'hospital'
         : name === 'mechanic'
           ? 'mechanic'
-          : 'range';
+          : name === 'church'
+            ? 'church'
+            : 'range';
   const info = findCellByTag(tag);
   if (!info) return null;
   const [x, , z] = info.center;

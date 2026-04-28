@@ -3,6 +3,7 @@ import { Physics, type RapierRigidBody } from '@react-three/rapier';
 import { Suspense, useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import City from './world/City';
+import ChurchBells from './world/ChurchBells';
 import DayNightLighting from './world/DayNightLighting';
 import WeatherEffects from './world/WeatherEffects';
 import Player from './player/Player';
@@ -14,6 +15,9 @@ import Range from './targets/Range';
 import GunStoreCounter from './interactions/GunStoreCounter';
 import HospitalCounter from './interactions/HospitalCounter';
 import MechanicShop from './interactions/MechanicShop';
+import ChurchPodium from './interactions/ChurchPodium';
+import ChurchLightSwitch from './interactions/ChurchLightSwitch';
+import type { Verse } from './world/bibleVerses';
 import HitFx from './weapons/HitFx';
 import { useMeleeController } from './weapons/useMeleeController';
 import { useWeaponController } from './weapons/useWeaponController';
@@ -32,7 +36,17 @@ import { useGameStore, WORLD_TIME_RATE } from '@/state/gameStore';
 import { useNetStore } from '@/multiplayer/netStore';
 import MultiplayerProvider from '@/multiplayer/MultiplayerProvider';
 
-function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () => void }) {
+function SceneContent({
+  paused,
+  onOpenShop,
+  onOpenVerse,
+  onOpenLightSwitch,
+}: {
+  paused: boolean;
+  onOpenShop: () => void;
+  onOpenVerse: (verse: Verse) => void;
+  onOpenLightSwitch: () => void;
+}) {
   const inMpSession = useNetStore((s) => s.inGame);
   const isHost = useNetStore((s) => s.isHost);
   // In MP, only the host runs NPC AI / spawners; clients render NPCs from
@@ -70,6 +84,7 @@ function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () 
     <>
       <DayNightLighting />
       <WeatherEffects />
+      <ChurchBells />
       <City paused={paused} />
       {npcsEnabled && <Spawner paused={paused} />}
       {npcsEnabled && <DebugTraffic paused={paused} />}
@@ -77,6 +92,8 @@ function SceneContent({ paused, onOpenShop }: { paused: boolean; onOpenShop: () 
       <GunStoreCounter onOpen={onOpenShop} />
       <HospitalCounter />
       <MechanicShop />
+      <ChurchPodium onOpen={onOpenVerse} />
+      <ChurchLightSwitch onOpen={onOpenLightSwitch} />
       <DrivableCars paused={paused} />
       <SpawnedVehicles paused={paused} />
       <Player ref={playerRef} paused={paused} />
@@ -91,10 +108,14 @@ export default function Game({
   paused,
   mouseFree,
   onOpenShop,
+  onOpenVerse,
+  onOpenLightSwitch,
 }: {
   paused: boolean;
   mouseFree?: boolean;
   onOpenShop: () => void;
+  onOpenVerse: (verse: Verse) => void;
+  onOpenLightSwitch: () => void;
 }) {
   usePointerLook(!paused && !mouseFree);
   useInteractionKey(!paused);
@@ -103,6 +124,7 @@ export default function Game({
   const tickWanted = useGameStore((s) => s.tickWanted);
   const tickWorldTime = useGameStore((s) => s.tickWorldTime);
   const tickWeather = useGameStore((s) => s.tickWeather);
+  const tickStocks = useGameStore((s) => s.tickStocks);
   const lastTickRef = useRef(performance.now());
   // In MP, only the host advances world time / weather / wanted heat.
   // Clients receive worldTime + weather via snapshot and skip these ticks
@@ -123,13 +145,15 @@ export default function Game({
       if (!inMpClient) {
         tickWanted(dt);
         tickWorldTime(dt);
-        tickWeather((dt / 1000) * WORLD_TIME_RATE);
+        const gameSeconds = (dt / 1000) * WORLD_TIME_RATE;
+        tickWeather(gameSeconds);
+        tickStocks(gameSeconds);
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [paused, tickPlaytime, tickWanted, tickWorldTime, tickWeather, inMpClient]);
+  }, [paused, tickPlaytime, tickWanted, tickWorldTime, tickWeather, tickStocks, inMpClient]);
 
   useEffect(() => {
     if ((paused || mouseFree) && document.pointerLockElement) {
@@ -166,6 +190,11 @@ export default function Game({
   }, []);
 
   const handleOpenShop = useCallback(() => onOpenShop(), [onOpenShop]);
+  const handleOpenVerse = useCallback((v: Verse) => onOpenVerse(v), [onOpenVerse]);
+  const handleOpenLightSwitch = useCallback(
+    () => onOpenLightSwitch(),
+    [onOpenLightSwitch],
+  );
 
   return (
     <Canvas
@@ -185,7 +214,12 @@ export default function Game({
     >
       <Suspense fallback={null}>
         <Physics gravity={[0, -9.81, 0]} paused={paused} timeStep="vary">
-          <SceneContent paused={paused} onOpenShop={handleOpenShop} />
+          <SceneContent
+            paused={paused}
+            onOpenShop={handleOpenShop}
+            onOpenVerse={handleOpenVerse}
+            onOpenLightSwitch={handleOpenLightSwitch}
+          />
         </Physics>
       </Suspense>
     </Canvas>

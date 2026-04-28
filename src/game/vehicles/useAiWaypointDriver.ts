@@ -14,6 +14,12 @@ import { LANE_WAYPOINTS } from '@/game/world/worldWaypoints';
 import { mustStopAtLight } from '@/game/world/trafficLightState';
 import { isVehicleAhead } from './vehicleRegistry';
 import { CAR_COLLIDER_HALF } from './drivingConstants';
+import { writeCarPitch } from './vehicleState';
+import {
+  makeGroundProbeResult,
+  pitchAlongHeading,
+  useGroundProbe,
+} from './groundProbe';
 
 // Kinematic path-follower AI. Each car becomes a `KinematicPositionBased`
 // body, advances along a planned Bezier-curve segment between consecutive
@@ -27,13 +33,15 @@ import { CAR_COLLIDER_HALF } from './drivingConstants';
 
 const BODY_KINEMATIC_POSITION = 2;
 
-// The Y at which a car's body center sits when its collider bottom is flush
-// with the y=0 island ground. Hardcoded instead of read from r.translation()
-// at AI takeover: the car spawns Dynamic at CAR_SPAWN_Y and the AI hook
-// captures whatever Y gravity has reached on the first useFrame, which is
-// race-dependent across refreshes — that's the "different heights every
-// reload, sometimes only roofs / sometimes wheels clipping" symptom.
-const CAR_GROUND_Y = CAR_COLLIDER_HALF[1];
+// Half-height of the body collider — used by the ground probe to place the
+// body center `halfH` above the surface so the wheels sit flush.
+const HALF_H = CAR_COLLIDER_HALF[1];
+
+// Exponential-lerp time constants for ground-probe Y / pitch tracking. Same
+// values as the player-driven car (see useCarDriver.ts) so they ride the
+// bridge identically.
+const Y_LERP_K = 15;
+const PITCH_LERP_K = 10;
 
 // ~1.5 car lengths ahead.
 const FOLLOW_DIST = 6;
@@ -230,6 +238,7 @@ export function useAiWaypointDriver({
     segment: Segment;
     progress: number;
     groundY: number;
+    pitch: number;
   }>({
     initialized: false,
     prevWpId: null,
@@ -244,10 +253,13 @@ export function useAiWaypointDriver({
     },
     progress: 0,
     groundY: 0.6,
+    pitch: 0,
   });
   const ctxRef = useRef({ pos: { x: 0, z: 0 } });
   const sampleRef = useRef<SamplePos>({ x: 0, z: 0, yaw: 0 });
   const tmpQuat = useRef(new THREE.Quaternion());
+  const probeGround = useGroundProbe();
+  const probeOut = useRef(makeGroundProbeResult());
   const debugRef = useRef({
     stuckTimer: 0,
     lastFromTo: '',
@@ -277,9 +289,16 @@ export function useAiWaypointDriver({
       s.toWpId = next.id;
       s.segment = buildSegment(startWp, next);
       s.progress = 0;
-      s.groundY = CAR_GROUND_Y;
       s.initialized = true;
       const sp = sampleSegment(s.segment, 0, sampleRef.current);
+      // Initial ground probe: snap directly to the surface beneath the
+      // first sample so the car appears at the correct height (deck-Y on
+      // the bridge, grade-Y on the streets) instead of clipping through
+      // until the first lerp catches up.
+      const initProbe = probeGround(sp.x, sp.z, HALF_H, HALF_H, r, probeOut.current);
+      s.groundY = initProbe.targetY;
+      s.pitch = pitchAlongHeading(initProbe.normal, sp.yaw);
+      writeCarPitch(id, s.pitch);
       r.setNextKinematicTranslation({ x: sp.x, y: s.groundY, z: sp.z });
       tmpQuat.current.setFromAxisAngle(_Y_AXIS, sp.yaw);
       r.setNextKinematicRotation(tmpQuat.current);
@@ -399,6 +418,19 @@ export function useAiWaypointDriver({
       s.progress / s.segment.length,
       sampleRef.current,
     );
+
+    // Track the surface beneath the new (x, z): one downward raycast against
+    // fixed colliders gives us the deck Y when we're on the bridge and
+    // grade-Y everywhere else. Lerping (not snapping) absorbs deck-segment
+    // seam jitter.
+    const ground = probeGround(sp.x, sp.z, s.groundY, HALF_H, r, probeOut.current);
+    const yLerp = 1 - Math.exp(-dt * Y_LERP_K);
+    s.groundY += (ground.targetY - s.groundY) * yLerp;
+    const targetPitch = pitchAlongHeading(ground.normal, sp.yaw);
+    const pLerp = 1 - Math.exp(-dt * PITCH_LERP_K);
+    s.pitch += (targetPitch - s.pitch) * pLerp;
+    writeCarPitch(id, s.pitch);
+
     r.setNextKinematicTranslation({ x: sp.x, y: s.groundY, z: sp.z });
     tmpQuat.current.setFromAxisAngle(_Y_AXIS, sp.yaw);
     r.setNextKinematicRotation(tmpQuat.current);

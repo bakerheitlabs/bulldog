@@ -143,7 +143,11 @@ export function startHostLoop(transport: Transport): void {
       npcs,
       npcsGone,
       worldTime: gs.time.seconds,
+      worldDate: { y: gs.time.year, m: gs.time.month, d: gs.time.day },
       weather: gs.weather.type,
+      stockPrices: Object.fromEntries(
+        Object.entries(gs.stocks.prices).map(([k, v]) => [k, v.price]),
+      ),
     });
   }, SNAPSHOT_INTERVAL_MS);
 }

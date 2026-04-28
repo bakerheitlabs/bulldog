@@ -1,13 +1,13 @@
 import { useFrame } from '@react-three/fiber';
 import { startTransition, useMemo, useRef, useState } from 'react';
 import {
-  allCells,
-  cellCenter,
-  cellSize,
-  getCell,
-  worldToCell,
+  findCityGridAt,
+  getAllCityGrids,
+  getCityGrid,
   type CellInfo,
+  type CityGrid,
 } from './cityLayout';
+import './island3'; // side-effect: registers ISLAND3_CITY in the multi-grid registry
 import { useGameStore } from '@/state/gameStore';
 import { readDrivenCarPos, useVehicleStore } from '@/game/vehicles/vehicleState';
 
@@ -21,16 +21,17 @@ const CHUNK_SIZE = 3; // cells per chunk side
 // finished, which read as "stuck in LOD."
 const VIEW_RADIUS = 2;
 
-// Off-grid (airport highway, airport pad) we can't use the chunk grid because
-// the chunk grid only covers the city. Fall back to a distance-based window
-// around the player, throttled by snapping to OFF_GRID_SNAP_M so we re-build
-// the visible list at the same cadence the on-grid path does.
+// Off-grid (airport highway, airport pad, between islands) we can't use the
+// chunk grid because the chunk grid only covers each city. Fall back to a
+// distance-based window around the player, throttled by snapping to
+// OFF_GRID_SNAP_M so we re-build the visible list at the same cadence the
+// on-grid path does.
 const OFF_GRID_SNAP_M = 90; // recompute when the player moves this far
 const OFF_GRID_VIEW_M = 600; // cells within this radius are eligible
 const OFF_GRID_MAX_CELLS = 180; // hard cap on how many cells we draw at once
 
 export type ChunkKey =
-  | { kind: 'on-grid'; cc: number; cr: number }
+  | { kind: 'on-grid'; gridId: string; cc: number; cr: number }
   | { kind: 'off-grid'; sx: number; sz: number; px: number; pz: number };
 
 export function getPlayerPos(): [number, number] {
@@ -44,13 +45,17 @@ export function getPlayerPos(): [number, number] {
 
 export function playerChunk(): ChunkKey {
   const [px, pz] = getPlayerPos();
-  const cell = worldToCell(px, pz);
-  if (cell) {
-    return {
-      kind: 'on-grid',
-      cc: Math.floor(cell.col / CHUNK_SIZE),
-      cr: Math.floor(cell.row / CHUNK_SIZE),
-    };
+  const grid = findCityGridAt(px, pz);
+  if (grid) {
+    const cell = grid.worldToCell(px, pz);
+    if (cell) {
+      return {
+        kind: 'on-grid',
+        gridId: grid.id,
+        cc: Math.floor(cell.col / CHUNK_SIZE),
+        cr: Math.floor(cell.row / CHUNK_SIZE),
+      };
+    }
   }
   return {
     kind: 'off-grid',
@@ -63,7 +68,8 @@ export function playerChunk(): ChunkKey {
 
 export function chunksEqual(a: ChunkKey, b: ChunkKey): boolean {
   if (a.kind !== b.kind) return false;
-  if (a.kind === 'on-grid' && b.kind === 'on-grid') return a.cc === b.cc && a.cr === b.cr;
+  if (a.kind === 'on-grid' && b.kind === 'on-grid')
+    return a.gridId === b.gridId && a.cc === b.cc && a.cr === b.cr;
   if (a.kind === 'off-grid' && b.kind === 'off-grid') return a.sx === b.sx && a.sz === b.sz;
   return false;
 }
@@ -74,13 +80,23 @@ function cellInChunkRange(col: number, row: number, cc: number, cr: number): boo
   return Math.abs(c - cc) <= VIEW_RADIUS && Math.abs(r - cr) <= VIEW_RADIUS;
 }
 
-const ALL = allCells();
+// Cached flat list of cells per grid. Built once at module load (after island3
+// has registered itself via the side-effect import above).
+function buildAllCellsByGrid(): Record<string, CellInfo[]> {
+  const out: Record<string, CellInfo[]> = {};
+  for (const g of getAllCityGrids()) out[g.id] = g.allCells();
+  return out;
+}
+const ALL_BY_GRID = buildAllCellsByGrid();
+
+// Flat list across all grids (for off-grid distance ranking).
+const ALL_FLAT: CellInfo[] = Object.values(ALL_BY_GRID).flat();
 
 // Super-block anchors may sit just outside the visible chunk range when one of
 // their absorbed siblings is visible. Include the anchor so the merged render
 // covers the visible absorbed area (otherwise the sibling skips itself while
 // no one renders its footprint).
-function withAnchors(cells: CellInfo[]): CellInfo[] {
+function withAnchors(cells: CellInfo[], grid: CityGrid): CellInfo[] {
   const byKey = new Map<string, CellInfo>();
   for (const info of cells) byKey.set(`${info.col},${info.row}`, info);
   for (const info of cells) {
@@ -90,14 +106,15 @@ function withAnchors(cells: CellInfo[]): CellInfo[] {
     if (!ref) continue;
     const key = `${ref.col},${ref.row}`;
     if (byKey.has(key)) continue;
-    const anchorCell = getCell(ref.col, ref.row);
+    const anchorCell = grid.getCell(ref.col, ref.row);
     if (!anchorCell) continue;
     byKey.set(key, {
+      gridId: grid.id,
       col: ref.col,
       row: ref.row,
       cell: anchorCell,
-      center: cellCenter(ref.col, ref.row),
-      size: cellSize(ref.col, ref.row),
+      center: grid.cellCenter(ref.col, ref.row),
+      size: grid.cellSize(ref.col, ref.row),
     });
   }
   return Array.from(byKey.values());
@@ -105,24 +122,45 @@ function withAnchors(cells: CellInfo[]): CellInfo[] {
 
 export function visibleForChunk(key: ChunkKey): CellInfo[] {
   if (key.kind === 'on-grid') {
+    const grid = getCityGrid(key.gridId);
+    if (!grid) return [];
+    const cellsForGrid = ALL_BY_GRID[key.gridId] ?? [];
     return withAnchors(
-      ALL.filter(({ col, row }) => cellInChunkRange(col, row, key.cc, key.cr)),
+      cellsForGrid.filter(({ col, row }) => cellInChunkRange(col, row, key.cc, key.cr)),
+      grid,
     );
   }
-  // Off-grid: take the N closest grid cells within the view radius. From the
-  // airport you only ever see the half of the city facing you anyway, so a
-  // capped nearest-N list keeps the draw call count bounded while still
-  // giving a city silhouette.
+  // Off-grid: take the N closest grid cells (across all grids) within the view
+  // radius. Keeps draw call count bounded while still showing distant cities
+  // when the player is between islands or on the airport pad.
   const r2 = OFF_GRID_VIEW_M * OFF_GRID_VIEW_M;
   const ranked: { info: CellInfo; d2: number }[] = [];
-  for (const info of ALL) {
+  for (const info of ALL_FLAT) {
     const dx = info.center[0] - key.px;
     const dz = info.center[2] - key.pz;
     const d2 = dx * dx + dz * dz;
     if (d2 <= r2) ranked.push({ info, d2 });
   }
   ranked.sort((a, b) => a.d2 - b.d2);
-  return withAnchors(ranked.slice(0, OFF_GRID_MAX_CELLS).map((r) => r.info));
+  // Re-attach anchors per-grid so super-blocks render correctly across the
+  // off-grid window.
+  const top = ranked.slice(0, OFF_GRID_MAX_CELLS).map((r) => r.info);
+  const byGrid = new Map<string, CellInfo[]>();
+  for (const info of top) {
+    let arr = byGrid.get(info.gridId);
+    if (!arr) {
+      arr = [];
+      byGrid.set(info.gridId, arr);
+    }
+    arr.push(info);
+  }
+  const out: CellInfo[] = [];
+  for (const [gid, list] of byGrid) {
+    const grid = getCityGrid(gid);
+    if (!grid) continue;
+    out.push(...withAnchors(list, grid));
+  }
+  return out;
 }
 
 // Returns the player's current chunk key. Re-renders only when the player

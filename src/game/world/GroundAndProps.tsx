@@ -10,13 +10,16 @@ export default function GroundAndProps() {
   return (
     <group>
       {/* city blocks, parks, and parking lots get their own surface color */}
-      {cells.map(({ col, row, cell, center, size }) => {
+      {cells.map(({ gridId, col, row, cell, center, size }) => {
         if (cell.kind !== 'building' && cell.kind !== 'park' && cell.kind !== 'parkingLot') {
           return null;
         }
         if (cell.kind === 'building' && cell.mergedInto) return null;
         // Plaza blocks paint their own surface; skip the base ground layer.
         if (cell.kind === 'building' && cell.blockType === 'plaza') return null;
+        // Stadium / marina paint their own ground in their landmark components.
+        if (cell.kind === 'building' && (cell.tag === 'stadium' || cell.tag === 'marina'))
+          return null;
         let x = center[0];
         let z = center[2];
         let w = size.width;
@@ -36,7 +39,7 @@ export default function GroundAndProps() {
               : '#46464d';
         return (
           <mesh
-            key={`surf_${col}_${row}`}
+            key={`surf_${gridId}_${col}_${row}`}
             position={[x, 0.02, z]}
             rotation={[-Math.PI / 2, 0, 0]}
             receiveShadow
@@ -47,7 +50,7 @@ export default function GroundAndProps() {
         );
       })}
       {/* a few trees in parks — offsets scale with cell dimensions */}
-      {cells.map(({ col, row, cell, center, size }) => {
+      {cells.map(({ gridId, col, row, cell, center, size }) => {
         if (cell.kind !== 'park') return null;
         const [x, , z] = center;
         const sx = size.width / 50;
@@ -57,7 +60,7 @@ export default function GroundAndProps() {
           const tx = x + ((i % 3) - 1) * 12 * sx;
           const tz = z + (Math.floor(i / 3) - 0.5) * 14 * sz;
           trees.push(
-            <group key={`tree_${col}_${row}_${i}`} position={[tx, 0, tz]}>
+            <group key={`tree_${gridId}_${col}_${row}_${i}`} position={[tx, 0, tz]}>
               <mesh position={[0, 1.5, 0]} castShadow>
                 <cylinderGeometry args={[0.25, 0.3, 3]} />
                 <meshStandardMaterial color="#553a22" />
@@ -69,7 +72,7 @@ export default function GroundAndProps() {
             </group>,
           );
         }
-        return <group key={`trees_${col}_${row}`}>{trees}</group>;
+        return <group key={`trees_${gridId}_${col}_${row}`}>{trees}</group>;
       })}
     </group>
   );

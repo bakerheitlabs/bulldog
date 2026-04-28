@@ -1,6 +1,7 @@
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import { isPointSheltered } from './shelterRegions';
 
 // Single LineSegments object holding ~2500 vertical "streak" drops. The whole
 // volume snaps to the camera each frame so the player is always inside the
@@ -64,11 +65,15 @@ export default function Rain({ active }: { active: boolean }) {
   useFrame((state, dt) => {
     const group = groupRef.current;
     if (!group) return;
-    group.visible = active;
-    if (!active) return;
+    const cam = state.camera;
+    // Hide visuals when the camera is inside a registered shelter (e.g. the
+    // church interior); audio continues to play because WeatherAudio drives
+    // off the global weather state, not this component.
+    const sheltered = isPointSheltered(cam.position.x, cam.position.y, cam.position.z);
+    group.visible = active && !sheltered;
+    if (!active || sheltered) return;
     // Snap the rain volume to the camera so the player is always inside it,
     // including at flight altitude.
-    const cam = state.camera;
     group.position.set(cam.position.x, cam.position.y, cam.position.z);
 
     const arr = segments.geometry.attributes.position.array as Float32Array;

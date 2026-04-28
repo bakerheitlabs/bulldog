@@ -3,18 +3,21 @@ import * as THREE from 'three';
 import {
   BUILDING_COLORS,
   SIDEWALK_WIDTH,
-  allCells,
+  getAllCityGrids,
   type BuildingCell,
   type CellInfo,
 } from './cityLayout';
+import './island3'; // side-effect: registers ISLAND3_CITY
 import { getPlayerPos, useChunkKey, visibleForChunk } from './Chunks';
 
 // Outer radius governs how far the city silhouette extends.
 const OUTER_RADIUS = 2800;
 
-// Capacity for the InstancedMesh. Subdivided cells emit up to 4 primitives,
-// so the upper bound is ~169 anchor cells × 4 ≈ 676 — round up for headroom.
-const MAX_INSTANCES = 800;
+// Capacity for the InstancedMesh. Subdivided cells emit up to 4 primitives;
+// upper bound across both grids (main 25×25 + island3 13×13 ≈ 794 cells × 4)
+// is ~3200. We hard-cap by player distance so MAX_INSTANCES only needs to cover
+// what's reachable in the OUTER_RADIUS window — bumped to 1200 for headroom.
+const MAX_INSTANCES = 1200;
 
 // Sampled wall color for the Kenney `building_generic` GLB. The wall faces
 // (triangles whose normal isn't vertical) map mostly to two near-white strips
@@ -92,6 +95,7 @@ function subdivideLots(
 }
 
 type Primitive = {
+  gridId: string;
   col: number;
   row: number;
   cx: number;
@@ -142,6 +146,7 @@ function cellPrimitives(info: CellInfo): Primitive[] {
   if (isMechanic) {
     return [
       {
+        gridId: info.gridId,
         col: info.col,
         row: info.row,
         cx,
@@ -157,6 +162,24 @@ function cellPrimitives(info: CellInfo): Primitive[] {
   if (isHospital) {
     return [
       {
+        gridId: info.gridId,
+        col: info.col,
+        row: info.row,
+        cx,
+        cz,
+        width: w,
+        height: h,
+        depth: d,
+        color: new THREE.Color(b.color),
+      },
+    ];
+  }
+
+  // Stadium / marina: full-cell silhouette using the cell color.
+  if (b.tag === 'stadium' || b.tag === 'marina') {
+    return [
+      {
+        gridId: info.gridId,
         col: info.col,
         row: info.row,
         cx,
@@ -176,6 +199,7 @@ function cellPrimitives(info: CellInfo): Primitive[] {
 
   if (b.blockType === 'subdivided') {
     return subdivideLots(info.col, info.row, cx, cz, w, d).map((lot) => ({
+      gridId: info.gridId,
       col: info.col,
       row: info.row,
       cx: lot.x,
@@ -199,6 +223,7 @@ function cellPrimitives(info: CellInfo): Primitive[] {
     const bz = alongX ? cz : cz + sign * (d / 4 + 0.2);
     return [
       {
+        gridId: info.gridId,
         col: info.col,
         row: info.row,
         cx: bx,
@@ -235,6 +260,7 @@ function cellPrimitives(info: CellInfo): Primitive[] {
   const color = isGunstore ? GUNSTORE_COLOR : isRange ? b.color : WALL_COLOR;
   return [
     {
+      gridId: info.gridId,
       col: info.col,
       row: info.row,
       cx: bx,
@@ -247,10 +273,12 @@ function cellPrimitives(info: CellInfo): Primitive[] {
   ];
 }
 
-const ALL_PRIMITIVES: Primitive[] = allCells().flatMap(cellPrimitives);
+const ALL_PRIMITIVES: Primitive[] = getAllCityGrids()
+  .flatMap((g) => g.allCells())
+  .flatMap(cellPrimitives);
 
-function cellKey(col: number, row: number): string {
-  return `${col},${row}`;
+function cellKey(gridId: string, col: number, row: number): string {
+  return `${gridId}:${col},${row}`;
 }
 
 export default function DistantBuildings() {
@@ -272,7 +300,8 @@ export default function DistantBuildings() {
 
   const detailedKeys = useMemo(() => {
     const set = new Set<string>();
-    for (const info of visibleForChunk(chunk)) set.add(cellKey(info.col, info.row));
+    for (const info of visibleForChunk(chunk))
+      set.add(cellKey(info.gridId, info.col, info.row));
     return set;
   }, [chunk]);
 
@@ -288,7 +317,7 @@ export default function DistantBuildings() {
       // Skip the whole CELL if its detailed version is currently rendering —
       // every primitive belongs to one cell, so a single key check covers
       // mixed/subdivided lots together.
-      if (detailedKeys.has(cellKey(p.col, p.row))) continue;
+      if (detailedKeys.has(cellKey(p.gridId, p.col, p.row))) continue;
       const dx = p.cx - px;
       const dz = p.cz - pz;
       if (dx * dx + dz * dz > outerR2) continue;

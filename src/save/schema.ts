@@ -1,4 +1,4 @@
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 6;
 
 export type WeaponId = 'handgun' | 'shotgun' | 'smg';
 
@@ -32,9 +32,25 @@ export type GameStoreSnapshot = {
     // Seconds since in-game midnight (0..86400). World time runs at 30× real
     // time (1 in-game hour = 2 real minutes), driven by Game.tsx's tick loop.
     seconds: number;
+    // In-world Gregorian date. Day-of-week is derived (see gameDate.ts).
+    year: number;
+    month: number; // 1..12
+    day: number; // 1..31
   };
   weather: {
     type: WeatherType;
+  };
+  stocks: {
+    // Current price + bounded recent history per symbol.
+    prices: Record<string, { price: number; history: number[] }>;
+    // Player holdings, lazy-created on first buy. Both fields hard-zero
+    // when shares hit zero so callers can safely read avgCost.
+    holdings: Record<string, { shares: number; avgCost: number }>;
+    // Game-seconds accumulated since the last price tick. Drains in
+    // `tickStocks` when it reaches TICK_INTERVAL_GAME_SEC.
+    elapsedSinceLastTick: number;
+    // Persisted mulberry32 state so save→load is deterministic.
+    rngState: number;
   };
   meta: {
     startedAt: number;

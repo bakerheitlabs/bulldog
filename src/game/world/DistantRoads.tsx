@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import {
-  allCells,
-  cellBounds,
+  getAllCityGrids,
+  getCityGrid,
   type CellInfo,
   type RoadCell,
 } from './cityLayout';
+import './island3'; // side-effect: registers ISLAND3_CITY
 import { getPlayerPos, useChunkKey, visibleForChunk } from './Chunks';
 
 // Matches DistantBuildings so the silhouette and the road grid extend equally
@@ -13,9 +14,9 @@ import { getPlayerPos, useChunkKey, visibleForChunk } from './Chunks';
 // distance.
 const OUTER_RADIUS = 2800;
 
-// Road cells alternate with block cells on each axis, so the upper bound on
-// road cells is roughly COLS*ROWS / 2 ≈ 312. Padding to 400 gives headroom.
-const MAX_INSTANCES = 400;
+// Road cells alternate with block cells on each axis. Across both grids
+// (main 25×25 + island3 13×13) ≈ ~395 road cells; pad to 600 for headroom.
+const MAX_INSTANCES = 600;
 
 // Sit just above the base ground (Y=0) but BELOW the detailed road's asphalt
 // (Y=0.01). If the LOD ever overlaps a detailed cell — whether from a
@@ -27,6 +28,7 @@ const ROAD_LOD_Y = 0.005;
 const ROAD_LOD_COLOR = '#2d2d33';
 
 type RoadFootprint = {
+  gridId: string;
   col: number;
   row: number;
   cx: number;
@@ -41,8 +43,11 @@ function resolveRoad(info: CellInfo): RoadFootprint | null {
   // Road cells absorbed into a super-block don't render — the anchoring
   // building covers them.
   if ((cell as RoadCell).mergedInto) return null;
-  const bounds = cellBounds(info.col, info.row);
+  const grid = getCityGrid(info.gridId);
+  if (!grid) return null;
+  const bounds = grid.cellBounds(info.col, info.row);
   return {
+    gridId: info.gridId,
     col: info.col,
     row: info.row,
     cx: (bounds.minX + bounds.maxX) / 2,
@@ -52,12 +57,13 @@ function resolveRoad(info: CellInfo): RoadFootprint | null {
   };
 }
 
-const ALL_ROADS: RoadFootprint[] = allCells()
+const ALL_ROADS: RoadFootprint[] = getAllCityGrids()
+  .flatMap((g) => g.allCells())
   .map(resolveRoad)
   .filter((f): f is RoadFootprint => f !== null);
 
-function cellKey(col: number, row: number): string {
-  return `${col},${row}`;
+function cellKey(gridId: string, col: number, row: number): string {
+  return `${gridId}:${col},${row}`;
 }
 
 export default function DistantRoads() {
@@ -88,7 +94,8 @@ export default function DistantRoads() {
   // crossings.
   const detailedKeys = useMemo(() => {
     const set = new Set<string>();
-    for (const info of visibleForChunk(chunk)) set.add(cellKey(info.col, info.row));
+    for (const info of visibleForChunk(chunk))
+      set.add(cellKey(info.gridId, info.col, info.row));
     return set;
   }, [chunk]);
 
@@ -101,7 +108,7 @@ export default function DistantRoads() {
     let n = 0;
     for (const fp of ALL_ROADS) {
       if (n >= MAX_INSTANCES) break;
-      if (detailedKeys.has(cellKey(fp.col, fp.row))) continue;
+      if (detailedKeys.has(cellKey(fp.gridId, fp.col, fp.row))) continue;
       const dx = fp.cx - px;
       const dz = fp.cz - pz;
       if (dx * dx + dz * dz > outerR2) continue;

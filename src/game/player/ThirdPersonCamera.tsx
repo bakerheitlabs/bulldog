@@ -28,9 +28,10 @@ const tmpDir = new THREE.Vector3();
 // Inset the camera this far from any wall it would clip into so the near plane
 // doesn't poke through the surface.
 const WALL_CAMERA_INSET = 0.25;
-// Don't shove the camera closer to the player than this — keeps the player
-// readable even when wedged in a corner.
-const MIN_CAMERA_DIST = 0.6;
+// Hard floor so the camera never lands at the exact target (which would place
+// it inside the player capsule). Anything above this is governed by the wall
+// hit, not a fixed minimum — see the wall-pushback comment below.
+const CAMERA_MIN_DIST = 0.05;
 
 export default function ThirdPersonCamera({ target }: { target: CameraTarget }) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
@@ -85,7 +86,14 @@ export default function ThirdPersonCamera({ target }: { target: CameraTarget }) 
         rapier.QueryFilterFlags.EXCLUDE_DYNAMIC | rapier.QueryFilterFlags.EXCLUDE_SENSORS,
       );
       if (hit) {
-        const clamped = Math.max(MIN_CAMERA_DIST, hit.timeOfImpact - WALL_CAMERA_INSET);
+        // Cap the camera at (toi - inset) so it never lands past the wall.
+        // Importantly, we DON'T impose a comfort minimum on top of this — when
+        // the wall is closer than 0.6m (e.g. the player walked right up to the
+        // back wall of the church near the podium), forcing a 0.6m camera
+        // distance would push the camera through the wall, occluding the
+        // player behind the wall mesh. Squishing the camera against the
+        // player is the lesser evil.
+        const clamped = Math.max(CAMERA_MIN_DIST, hit.timeOfImpact - WALL_CAMERA_INSET);
         tmpDesired.copy(tmpTarget).addScaledVector(tmpDir, clamped);
       }
     }

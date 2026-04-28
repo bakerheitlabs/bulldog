@@ -28,7 +28,7 @@ import {
 } from './drivingConstants';
 import { useCarDriver } from './useCarDriver';
 import { registerVehicle } from './vehicleRegistry';
-import { useVehicleStore } from './vehicleState';
+import { clearCarPitch, readCarPitch, useVehicleStore } from './vehicleState';
 import { useRemoteCarPose } from '@/multiplayer/useRemoteCarPose';
 
 export type CarVariantKey = CarVariant | 'carPolice';
@@ -152,7 +152,7 @@ export default function Car({
   const tmpPos = useRef(new THREE.Vector3());
 
   useEffect(() => {
-    return registerVehicle({
+    const unregister = registerVehicle({
       id,
       getPosition: () => {
         const r = rigidRef.current;
@@ -162,6 +162,12 @@ export default function Car({
         return tmpPos.current;
       },
     });
+    return () => {
+      unregister();
+      // Drop the per-car pitch entry so a re-spawned vehicle with the same
+      // id starts level instead of inheriting a stale tilt.
+      clearCarPitch(id);
+    };
     // tmpPos ref is stable per-mount; initialPos only changes on remount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -231,6 +237,8 @@ export default function Car({
     const fz = 1 - 2 * (q.x * q.x + q.y * q.y);
     return v.x * fx + v.z * fz;
   }, [rigidRef]);
+
+  const getPitch = useCallback(() => readCarPitch(id), [id]);
 
   const activeColor = storeColor ?? fallbackColor;
   const smokeColor = smokeColorForDamage(damage);
@@ -305,6 +313,7 @@ export default function Car({
                 variant={variant}
                 tint={storeColor}
                 getSpeed={getForwardSpeed}
+                getPitch={getPitch}
                 siren={isPolice && sirenOn}
               />
             </group>

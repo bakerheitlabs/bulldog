@@ -603,7 +603,7 @@ export default function DayNightLighting() {
               color={sunDiscColor}
               toneMapped={false}
               transparent
-              opacity={sunOpacity}
+              opacity={sunOpacity * 0.2}
               depthWrite={false}
             />
           </mesh>

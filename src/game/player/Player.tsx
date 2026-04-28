@@ -167,7 +167,15 @@ const Player = forwardRef<RapierRigidBody | null, { paused: boolean }>(function 
         const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
         const ox = carPos.x + side.x * 2.2;
         const oz = carPos.z + side.z * 2.2;
-        r.setTranslation({ x: ox, y: 1.2, z: oz }, true);
+        // Anchor exit-Y to the car's body Y rather than a hardcoded grade
+        // level. The car's Y already tracks whatever surface it's on (the
+        // bridge deck Y, ground Y on streets, etc.) thanks to the per-frame
+        // ground probe in useCarDriver. Adding 0.75 lifts the player just
+        // above the car so the dynamic-body re-spawn doesn't intersect the
+        // car's own collider; gravity then settles the player onto the deck.
+        // (0.75 = old hardcode 1.2 minus car half-height 0.45 → preserves
+        // the original grade-level offset.)
+        r.setTranslation({ x: ox, y: carPos.y + 0.75, z: oz }, true);
       }
       r.setBodyType(0, true); // 0 = Dynamic
       r.setLinvel({ x: 0, y: 0, z: 0 }, true);

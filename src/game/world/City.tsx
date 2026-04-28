@@ -1,4 +1,6 @@
 import AirportRegion from './AirportRegion';
+import Bridge from './Bridge';
+import BridgeApproach from './BridgeApproach';
 import Buildings from './Buildings';
 import DistantBuildings from './DistantBuildings';
 import DistantRoads from './DistantRoads';
@@ -23,6 +25,8 @@ export default function City({ paused }: { paused: boolean }) {
       <DistantBuildings />
       <DistantRoads />
       <TrafficLights />
+      <Bridge />
+      <BridgeApproach />
       <AirportRegion paused={paused} />
       <Island2Village />
       <Dock />

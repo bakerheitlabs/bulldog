@@ -8,12 +8,21 @@ import {
   type PointerEvent,
 } from 'react';
 import {
-  allCells,
-  cellBounds,
   CITY_MIN_X,
   CITY_MIN_Z,
   SIDEWALK_WIDTH,
+  getAllCityGrids,
+  getCityGrid,
+  type CellInfo,
 } from '@/game/world/cityLayout';
+import '@/game/world/island3'; // side-effect: registers ISLAND3_CITY
+import {
+  BRIDGE_MAIN_X,
+  BRIDGE_MAIN_Z,
+  BRIDGE_I3_X,
+  BRIDGE_I3_Z,
+  BRIDGE_DECK_WIDTH,
+} from '@/game/world/bridgeData';
 import { sampleSpline } from '@/game/world/suburbs';
 import { AIRPORTS, SPLINE_REGIONS } from '@/game/world/splineRegions';
 import { getAllIslands, type PerimeterPoint } from '@/game/world/landBounds';
@@ -34,7 +43,7 @@ type MapView = {
   size: number;
 };
 
-const CELLS = allCells();
+const CELLS: CellInfo[] = getAllCityGrids().flatMap((g) => g.allCells());
 const ISLANDS = getAllIslands();
 const MAP_PADDING = 10;
 // Extra water around the islands so the coast doesn't sit on the viewport edge.
@@ -185,6 +194,8 @@ function cellFill(kind: string, tag?: string) {
   if (tag === 'range') return '#69524b';
   if (tag === 'hospital') return '#d5d9dd';
   if (tag === 'church') return '#c8b58a';
+  if (tag === 'stadium') return '#7a7d83';
+  if (tag === 'marina') return '#cdb98a';
   switch (kind) {
     case 'road':
       return '#2c2f35';
@@ -475,22 +486,25 @@ function AirportLayer({ showLabels }: { showLabels: boolean }) {
 function MapCells({ showLabels }: { showLabels: boolean }) {
   return (
     <>
-      {CELLS.map(({ col, row, cell }) => {
+      {CELLS.map(({ gridId, col, row, cell }) => {
         if (cell.kind === 'road' && cell.mergedInto) return null;
         if (cell.kind === 'building' && cell.mergedInto) return null;
+        const grid = getCityGrid(gridId);
+        if (!grid) return null;
         const rawBounds =
           cell.kind === 'building' && cell.mergedBounds
             ? cell.mergedBounds
-            : cellBounds(col, row);
+            : grid.cellBounds(col, row);
         const x = rawBounds.minX - CITY_MIN_X;
         const y = rawBounds.minZ - CITY_MIN_Z;
         const w = rawBounds.maxX - rawBounds.minX;
         const h = rawBounds.maxZ - rawBounds.minZ;
         const fill = cellFill(cell.kind, cell.kind === 'building' ? cell.tag : undefined);
+        const key = `${gridId}_${col}_${row}`;
 
         if (cell.kind === 'building') {
           return (
-            <g key={`${col}_${row}`}>
+            <g key={key}>
               <rect x={x} y={y} width={w} height={h} fill="#73777d" />
               <rect
                 x={x + SIDEWALK_WIDTH}
@@ -514,7 +528,11 @@ function MapCells({ showLabels }: { showLabels: boolean }) {
                       ? 'H'
                       : cell.tag === 'church'
                         ? 'C'
-                        : 'R'}
+                        : cell.tag === 'stadium'
+                          ? 'S'
+                          : cell.tag === 'marina'
+                            ? 'M'
+                            : 'R'}
                 </text>
               )}
             </g>
@@ -522,7 +540,7 @@ function MapCells({ showLabels }: { showLabels: boolean }) {
         }
 
         return (
-          <g key={`${col}_${row}`}>
+          <g key={key}>
             <rect x={x} y={y} width={w} height={h} fill={fill} />
             {cell.kind === 'road' && (
               <RoadMarkings
@@ -553,6 +571,23 @@ function MapCells({ showLabels }: { showLabels: boolean }) {
         );
       })}
     </>
+  );
+}
+
+// Bridge stripe between main island and island 3.
+function BridgeLayer() {
+  const a = toMapPos(BRIDGE_MAIN_X, BRIDGE_MAIN_Z);
+  const b = toMapPos(BRIDGE_I3_X, BRIDGE_I3_Z);
+  return (
+    <line
+      x1={a.x}
+      y1={a.y}
+      x2={b.x}
+      y2={b.y}
+      stroke="#2c2f35"
+      strokeWidth={Math.max(4, BRIDGE_DECK_WIDTH * 0.5)}
+      strokeLinecap="square"
+    />
   );
 }
 
@@ -898,6 +933,7 @@ export default function CityMap({ variant }: CityMapProps) {
         <AirportLayer showLabels={!isMinimap} />
         <MapCells showLabels={!isMinimap} />
         <SuburbLayer />
+        <BridgeLayer />
         <DockLayer />
         <g
           transform={`translate(${player.x} ${player.y}) rotate(${pose.heading}) scale(${markerScale})`}

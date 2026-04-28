@@ -5,6 +5,8 @@ import { useCityModel, useFitToBox, type ModelKey } from './cityAssets';
 import GltfBoundary from './GltfBoundary';
 import { useVisibleCells } from './Chunks';
 import Church from './buildings/Church';
+import Stadium from './buildings/Stadium';
+import Marina from './buildings/Marina';
 
 const ALLEY_WIDTH = 2;
 const ALLEY_COLOR = '#3a3d44';
@@ -1083,7 +1085,7 @@ export default function Buildings() {
   const cells = useVisibleCells();
   return (
     <group>
-      {cells.map(({ col, row, cell, center, size }) => {
+      {cells.map(({ gridId, col, row, cell, center, size }) => {
         if (cell.kind !== 'building') return null;
         if (cell.mergedInto) return null;
         let x = center[0];
@@ -1105,32 +1107,49 @@ export default function Buildings() {
         const isMechanic = cell.tag === 'mechanic';
         const isHospital = cell.tag === 'hospital';
         const isChurch = cell.tag === 'church';
+        const isStadium = cell.tag === 'stadium';
+        const isMarina = cell.tag === 'marina';
         const bodyColor = isGunstore ? '#a83a2c' : cell.color;
         const modelKey: ModelKey = isGunstore ? 'buildingGunstore' : 'buildingGeneric';
         const type: BlockType = cell.blockType;
+        const key = `b_${gridId}_${col}_${row}`;
         if (isMechanic) {
           return (
-            <group key={`b_${col}_${row}`}>
+            <group key={key}>
               <MechanicShop x={x} z={z} w={w} d={d} />
             </group>
           );
         }
         if (isHospital) {
           return (
-            <group key={`b_${col}_${row}`}>
+            <group key={key}>
               <HospitalInterior x={x} z={z} w={w} d={d} h={h} />
             </group>
           );
         }
         if (isChurch) {
           return (
-            <group key={`b_${col}_${row}`}>
+            <group key={key}>
               <Church x={x} z={z} w={w} d={d} h={h} />
             </group>
           );
         }
+        if (isStadium) {
+          return (
+            <group key={key}>
+              <Stadium x={x} z={z} w={w} d={d} h={h} />
+            </group>
+          );
+        }
+        if (isMarina) {
+          return (
+            <group key={key}>
+              <Marina x={x} z={z} w={w} d={d} h={h} />
+            </group>
+          );
+        }
         return (
-          <group key={`b_${col}_${row}`}>
+          <group key={key}>
             {type === 'standard' && (() => {
               // Per-building footprint and setback jitter so neighbors don't
               // read as a uniform wall. Tagged landmarks keep their full

@@ -467,6 +467,12 @@ function handleClientIncoming(msg: H2C & { _from: string }): void {
       // World time + weather: host is authoritative. Clients copy in.
       const gs = useGameStore.getState();
       gs.setWorldTimeSeconds(msg.worldTime);
+      gs.setWorldDate({
+        year: msg.worldDate.y,
+        month: msg.worldDate.m,
+        day: msg.worldDate.d,
+      });
+      gs.setStockPrices(msg.stockPrices);
       const w = msg.weather as 'sunny' | 'cloudy' | 'rain' | 'storm';
       if (w === 'sunny' || w === 'cloudy' || w === 'rain' || w === 'storm') {
         gs.setWeather(w);

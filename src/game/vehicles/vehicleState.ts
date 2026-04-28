@@ -115,6 +115,30 @@ export function readDrivenCarYaw(): number {
   return _drivenYaw;
 }
 
+// Per-car pitch (X-axis tilt of the visual body) so cars climb/descend the
+// bridge deck. The rigid body itself is Y-rotation-locked (see Car.tsx
+// `enabledRotations`), so pitch only affects rendering — `CarModel` reads
+// this each frame and applies it to a wrapper group around the visuals.
+//
+// Both useCarDriver (player) and useAiWaypointDriver (AI) write here from
+// the result of a downward `useGroundProbe` raycast against fixed colliders.
+// Parked dynamic cars don't write — their pitch stays at the last value
+// (default 0) and the dynamic body settles onto the deck via gravity, so a
+// little stale pitch is invisible.
+const _carPitches = new Map<string, number>();
+
+export function writeCarPitch(id: string, pitch: number) {
+  _carPitches.set(id, pitch);
+}
+
+export function readCarPitch(id: string): number {
+  return _carPitches.get(id) ?? 0;
+}
+
+export function clearCarPitch(id: string) {
+  _carPitches.delete(id);
+}
+
 // Module-level pose mirror for the currently flown airplane. Planes have an
 // extra two angular DOFs (pitch + roll) on top of yaw, so we keep a separate
 // mirror rather than overloading the car one.

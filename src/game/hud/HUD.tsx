@@ -14,6 +14,7 @@ import {
 import { GROUND_Y } from '@/game/airplanes/airplaneConstants';
 import { useSettingsStore } from '@/state/settingsStore';
 import { tokens } from '@/ui/tokens';
+import { formatDate, type GameDate } from '@/game/world/gameDate';
 import CityMap from './CityMap';
 import CompassBand from './CompassBand';
 
@@ -83,7 +84,7 @@ function HealthPanel({ hp }: { hp: number }) {
         }}
       >
         <span>Health</span>
-        <span style={{ color: tokens.color.text, fontWeight: 600 }}>{hp}</span>
+        <span style={{ color: tokens.color.text, fontWeight: 600 }}>{Math.round(hp)}</span>
       </div>
       <div
         style={{
@@ -143,7 +144,15 @@ const WEATHER_LABELS: Record<string, string> = {
   storm: 'STORM',
 };
 
-function ClockReadout({ seconds, weather }: { seconds: number; weather: string }) {
+function ClockReadout({
+  seconds,
+  date,
+  weather,
+}: {
+  seconds: number;
+  date: GameDate;
+  weather: string;
+}) {
   const { time, suffix } = formatClock(seconds);
   const label = WEATHER_LABELS[weather] ?? weather.toUpperCase();
   return (
@@ -176,6 +185,15 @@ function ClockReadout({ seconds, weather }: { seconds: number; weather: string }
           {suffix}
         </span>
       </div>
+      <span
+        style={{
+          color: tokens.color.text,
+          fontSize: 11,
+          letterSpacing: 0.6,
+        }}
+      >
+        {formatDate(date)}
+      </span>
       <span
         style={{
           color: tokens.color.textMuted,
@@ -214,7 +232,7 @@ function MoneyReadout({ money }: { money: number }) {
           textShadow: '0 1px 0 rgba(0,0,0,0.5)',
         }}
       >
-        {money.toLocaleString()}
+        {money.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </span>
     </div>
   );
@@ -347,6 +365,9 @@ export default function HUD() {
   const heat = useGameStore((s) => s.wanted.heat);
   const stars = starsFromHeat(heat);
   const worldSeconds = useGameStore((s) => s.time.seconds);
+  const worldYear = useGameStore((s) => s.time.year);
+  const worldMonth = useGameStore((s) => s.time.month);
+  const worldDay = useGameStore((s) => s.time.day);
   const weather = useGameStore((s) => s.weather.type);
   const [prompt, setPromptState] = useState<InteractionPrompt | null>(getPrompt());
   const drivenCarId = useVehicleStore((s) => s.drivenCarId);
@@ -494,7 +515,11 @@ export default function HUD() {
         )}
         <HealthPanel hp={player.health} />
         <MoneyReadout money={player.money} />
-        <ClockReadout seconds={worldSeconds} weather={weather} />
+        <ClockReadout
+          seconds={worldSeconds}
+          date={{ year: worldYear, month: worldMonth, day: worldDay }}
+          weather={weather}
+        />
       </div>
 
       {/* top-left: minimap */}

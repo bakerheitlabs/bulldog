@@ -131,12 +131,12 @@ export default function Roads() {
   const cells = useVisibleCells();
   return (
     <group>
-      {cells.map(({ col, row, cell, center, size }) => {
+      {cells.map(({ gridId, col, row, cell, center, size }) => {
         if (cell.kind !== 'road') return null;
         if (cell.mergedInto) return null;
         const [x, , z] = center;
         return (
-          <group key={`road_${col}_${row}`} position={[x, 0.01, z]}>
+          <group key={`road_${gridId}_${col}_${row}`} position={[x, 0.01, z]}>
             {cell.isIntersection ? (
               <Intersection size={size} />
             ) : cell.carriesNS ? (

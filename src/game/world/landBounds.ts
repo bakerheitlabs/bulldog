@@ -14,6 +14,7 @@ import { CITY_DEPTH, CITY_MIN_X, CITY_MIN_Z, CITY_WIDTH } from './cityLayout';
 import { getSuburbBounds } from './suburbs';
 import { getMainAirportPadBounds } from './airport';
 import { ISLAND2_LANDMASS } from './island2';
+import { ISLAND3_CITY } from './island3';
 
 export const BEACH_WIDTH = 36;
 // Water plane sits a hair below the grass baseline (y=0). Exported so movement
@@ -358,11 +359,42 @@ function getMainIslandSpec(): LandmassSpec {
   };
 }
 
+// Island 3 sits east of main, connected by a drivable bridge. Its landmass
+// hugs the orthogonal grid defined in island3.ts; the bays carve out a small
+// notch on the west coast facing the main island so the bridge entry feels
+// like it sits in a small inlet.
+//
+// The inner rect is inflated past ISLAND3_CITY.bounds by GRID_MARGIN so the
+// perimeter encloses the grid even at its corners (a rounded-rect corner with
+// radius r cuts ~r*(1 - 1/√2) ≈ 0.3r inside the bounding box, plus the noise
+// amplitudes can pull the coast inward further). Without that margin the
+// corner blocks visibly poked into the water on the minimap.
+function getIsland3Spec(): LandmassSpec {
+  const GRID_MARGIN = 40;
+  const b = ISLAND3_CITY.bounds;
+  return {
+    id: 'island3',
+    innerRect: {
+      minX: b.minX - GRID_MARGIN,
+      maxX: b.maxX + GRID_MARGIN,
+      minZ: b.minZ - GRID_MARGIN,
+      maxZ: b.maxZ + GRID_MARGIN,
+    },
+    // Smaller, more uniform corner radii than before — island 3 is half the
+    // main island's footprint, so the same per-corner numbers were eating a
+    // larger fraction of the coastline.
+    cornerRadii: [70, 60, 80, 65],
+    // Lower amplitudes so coast wobble can't pull below the grid margin.
+    noise: { seed: 53, amplitudes: [9, 5, 3, 2] },
+    bays: [{ tCenter: 0.75, tWidth: 0.05, depth: 25 }],
+  };
+}
+
 let _cached: IslandData[] | null = null;
 
 export function getAllIslands(): IslandData[] {
   if (_cached) return _cached;
-  _cached = [getMainIslandSpec(), ISLAND2_LANDMASS].map(buildIslandData);
+  _cached = [getMainIslandSpec(), ISLAND2_LANDMASS, getIsland3Spec()].map(buildIslandData);
   return _cached;
 }
 

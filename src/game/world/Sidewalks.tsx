@@ -8,7 +8,7 @@ export default function Sidewalks() {
 
   return (
     <group>
-      {cells.map(({ col, row, cell, center, size }) => {
+      {cells.map(({ gridId, col, row, cell, center, size }) => {
         if (cell.kind === 'road') return null;
         if (cell.kind === 'building' && cell.mergedInto) return null;
         let x = center[0];
@@ -25,7 +25,7 @@ export default function Sidewalks() {
         const offX = w / 2 - SIDEWALK_WIDTH / 2;
         const offZ = d / 2 - SIDEWALK_WIDTH / 2;
         return (
-          <group key={`sw_${col}_${row}`} position={[x, 0.05, z]}>
+          <group key={`sw_${gridId}_${col}_${row}`} position={[x, 0.05, z]}>
             <mesh position={[0, 0, -offZ]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
               <planeGeometry args={[w, SIDEWALK_WIDTH]} />
               <meshStandardMaterial color={SIDEWALK_COLOR} />

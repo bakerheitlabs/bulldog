@@ -7,8 +7,11 @@
 // Phase 5 adds shooting events. Clients send fire-req; host raycasts NPCs
 // authoritatively and broadcasts a fire event so other clients render the
 // tracer. Targets stay client-local for the range.
+// Phase 6 adds world date (year/month/day) to snapshots so clients render
+// the same in-game date as the host.
+// Phase 7 adds stock prices so clients see the host-authoritative market.
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 7;
 
 export interface PeerInfo {
   id: string;
@@ -120,8 +123,14 @@ export type H2C =
       npcsGone: string[];
       // World time-of-day in seconds (0..86400). Host's authoritative clock.
       worldTime: number;
+      // In-world Gregorian date. Host advances this when seconds wrap past
+      // midnight; clients copy it in (they don't tick world time themselves).
+      worldDate: { y: number; m: number; d: number };
       // Weather type ('sunny' | 'cloudy' | 'rain' | 'storm').
       weather: string;
+      // Current stock prices keyed by symbol. Clients maintain history
+      // locally from observed price changes; host owns the simulation.
+      stockPrices: Record<string, number>;
     };
 
 export type NetEvent =

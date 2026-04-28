@@ -14,13 +14,20 @@ import { snapCameraYawBehind } from '@/game/player/cameraState';
 import { useKeyboard } from '@/game/player/useKeyboard';
 import { VEHICLE_IDENTITY, type VehicleIdentityKey } from './vehicleIdentity';
 import {
+  CAR_COLLIDER_HALF,
   RUN_OVER_DAMAGE,
   RUN_OVER_RADIUS,
   RUN_OVER_SPEED,
+  getCarSizeScale,
 } from './drivingConstants';
 import { advanceCarState, quatToYaw, type CarControls } from './carPhysics';
 import { isCarDestroyed } from './CarSmoke';
-import { useVehicleStore, writeDrivenCarPose } from './vehicleState';
+import { useVehicleStore, writeCarPitch, writeDrivenCarPose } from './vehicleState';
+import {
+  makeGroundProbeResult,
+  pitchAlongHeading,
+  useGroundProbe,
+} from './groundProbe';
 
 // Rapier body types. 0 = Dynamic, 2 = KinematicPositionBased.
 const BODY_DYNAMIC = 0;
@@ -43,6 +50,12 @@ type Options = {
 // treated as a siren toggle; above it, as a held horn.
 const HORN_TAP_MS = 250;
 
+// Exponential-lerp time constants for ground-probe Y / pitch tracking. ~67ms
+// time-to-target at K=15 — fast enough to track a 9° grade at 24 m/s without
+// visible lag, slow enough to absorb deck-segment seam jitter.
+const Y_LERP_K = 15;
+const PITCH_LERP_K = 10;
+
 export function useCarDriver({ id, rigidRef, paused, variant }: Options) {
   const drivenCarId = useVehicleStore((s) => s.drivenCarId);
   const damage = useVehicleStore((s) => s.carDamage[id] ?? 0);
@@ -53,8 +66,14 @@ export function useCarDriver({ id, rigidRef, paused, variant }: Options) {
   const sirenRef = useRef<SirenHandle | null>(null);
   const initializedRef = useRef(false);
   const stateRef = useRef({ yaw: 0, speed: 0, x: 0, y: 0, z: 0 });
+  const pitchRef = useRef(0);
   const tmpPos = useRef(new THREE.Vector3());
   const tmpQuat = useRef(new THREE.Quaternion());
+  const probeGround = useGroundProbe();
+  const probeOut = useRef(makeGroundProbeResult());
+  // Half-height of the body collider — the probe places the body center
+  // `halfH` above the surface so the wheels sit flush.
+  const halfH = CAR_COLLIDER_HALF[1] * getCarSizeScale(variant);
 
   // Engine audio + body-type lifecycle tied to the driven flag. We flip the
   // body type here (not inside useFrame) so it happens once per transition.
@@ -185,6 +204,12 @@ export function useCarDriver({ id, rigidRef, paused, variant }: Options) {
       s.z = t.z;
       const v = r.linvel();
       s.speed = v.x * Math.sin(s.yaw) + v.z * Math.cos(s.yaw);
+      // Snap to the ground beneath the takeover position so a pickup that
+      // happens mid-bridge starts on the deck instead of sliding up to it.
+      const initProbe = probeGround(s.x, s.z, s.y, halfH, r, probeOut.current);
+      s.y = initProbe.targetY;
+      pitchRef.current = pitchAlongHeading(initProbe.normal, s.yaw);
+      writeCarPitch(id, pitchRef.current);
       snapCameraYawBehind(s.yaw);
       initializedRef.current = true;
     }
@@ -227,6 +252,20 @@ export function useCarDriver({ id, rigidRef, paused, variant }: Options) {
     const fz = Math.cos(s.yaw);
     s.x += fx * sp * dt;
     s.z += fz * sp * dt;
+
+    // Probe the surface beneath the new (x, z) and lerp Y / pitch toward it
+    // so the car follows ramps, the bridge deck, etc. Cars are kinematic
+    // bodies — Rapier won't push them onto colliders for us. Lerping (not
+    // snapping) absorbs deck-segment seam jitter and gives a natural climb
+    // feel rather than instant teleport-to-surface.
+    const probe = probeGround(s.x, s.z, s.y, halfH, r, probeOut.current);
+    const yLerp = 1 - Math.exp(-dt * Y_LERP_K);
+    s.y += (probe.targetY - s.y) * yLerp;
+    const targetPitch = pitchAlongHeading(probe.normal, s.yaw);
+    const pLerp = 1 - Math.exp(-dt * PITCH_LERP_K);
+    pitchRef.current += (targetPitch - pitchRef.current) * pLerp;
+    writeCarPitch(id, pitchRef.current);
+
     r.setNextKinematicTranslation({ x: s.x, y: s.y, z: s.z });
     tmpQuat.current.setFromAxisAngle(_Y_AXIS, s.yaw);
     r.setNextKinematicRotation({

@@ -13,17 +13,20 @@ import {
   type AirportSpec,
 } from './airport';
 import { ISLAND2_AIRPORT, ISLAND2_ROADS_SUBURB } from './island2';
+import { BRIDGE_APPROACH_SUBURB } from './bridgeApproachData';
 
 // All airports in the world. Order matters: index 0 is the main airport,
 // which hosts the scheduled airliner.
 export const AIRPORTS: AirportSpec[] = [MAIN_AIRPORT, ISLAND2_AIRPORT];
 
 // All spline-driven road regions: the city's east suburb, the main airport's
-// access highway, and island 2's road network. SuburbRoads.tsx maps over
-// this list and renders each region the same way.
+// access highway, the bridge approach to island 3, and island 2's road
+// network. SuburbRoads.tsx maps over this list and renders each region the
+// same way.
 export const SPLINE_REGIONS: Suburb[] = [
   ...SUBURBS,
   MAIN_AIRPORT_SUBURB,
+  BRIDGE_APPROACH_SUBURB,
   ISLAND2_ROADS_SUBURB,
 ];
 

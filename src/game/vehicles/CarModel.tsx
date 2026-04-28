@@ -31,6 +31,7 @@ export default function CarModel({
   variant,
   tint,
   getSpeed,
+  getPitch,
   siren = false,
 }: {
   variant: CarVariant | 'carPolice';
@@ -39,6 +40,12 @@ export default function CarModel({
   // moves along its local +Z; negative in reverse. Wheels stay still when
   // omitted.
   getSpeed?: () => number;
+  // X-axis pitch (radians) applied to the visual mesh so the car tilts up
+  // ramps and over the bridge deck. The rigid body is Y-rotation-locked
+  // (Car.tsx `enabledRotations`), so we apply pitch visually only — the
+  // collision body stays level. Both useCarDriver and useAiWaypointDriver
+  // publish per-car pitch via writeCarPitch / readCarPitch.
+  getPitch?: () => number;
   // When true, the GLB's red and blue cap materials pulse in alternation.
   // Only meaningful for `carPolice`.
   siren?: boolean;
@@ -52,6 +59,9 @@ export default function CarModel({
   const wheelsRef = useRef<WheelEntry[]>([]);
   const sirenRedRef = useRef<SirenMat | null>(null);
   const sirenBlueRef = useRef<SirenMat | null>(null);
+  // Wraps the GLB primitive so we can pitch the visual without touching the
+  // rigid body's Y-only rotation lock. Set in useFrame from getPitch().
+  const pitchGroupRef = useRef<THREE.Group | null>(null);
 
   useEffect(() => {
     const mats: THREE.MeshStandardMaterial[] = [];
@@ -214,6 +224,19 @@ export default function CarModel({
       }
     }
 
+    // Visual pitch tilt: applied to the wrapper group, not the rigid body
+    // (the body's X/Z rotations are disabled). The driver hooks publish
+    // per-car pitch every frame; we read it via the getter so CarModel stays
+    // generic (player-driven cars and AI cars share the same component).
+    //
+    // Sign note: `pitch` follows the aviation convention (positive = nose up).
+    // The car model has +Z forward, and a three.js X-axis rotation by +θ
+    // takes local +Z to (0, -sin θ, cos θ) — i.e. positive rotation.x tips
+    // the nose DOWN. Negate so a climbing-slope pitch lifts the nose.
+    if (pitchGroupRef.current && getPitch) {
+      pitchGroupRef.current.rotation.x = -getPitch();
+    }
+
     const red = sirenRedRef.current;
     const blue = sirenBlueRef.current;
     if (!red && !blue) return;
@@ -260,5 +283,9 @@ export default function CarModel({
     for (const mat of mats) mat.color.copy(next);
   }, [tint]);
 
-  return <primitive object={scene} position={[0, yOffset - 0.45, 0]} scale={scale} />;
+  return (
+    <group ref={pitchGroupRef}>
+      <primitive object={scene} position={[0, yOffset - 0.45, 0]} scale={scale} />
+    </group>
+  );
 }
