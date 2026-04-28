@@ -515,22 +515,11 @@ export function startCityAmbient(): AmbientHandle | null {
   hum2Gain.connect(out);
   hum2.start();
 
-  let honkTimer: number | null = null;
-  const scheduleHonk = () => {
-    const delayMs = 6000 + Math.random() * 10000;
-    honkTimer = window.setTimeout(() => {
-      playDistantHonk(out);
-      scheduleHonk();
-    }, delayMs);
-  };
-  scheduleHonk();
-
   let stopped = false;
   return {
     stop: () => {
       if (stopped) return;
       stopped = true;
-      if (honkTimer != null) window.clearTimeout(honkTimer);
       const now = ctx.currentTime;
       out.gain.setTargetAtTime(0, now, 0.2);
       window.setTimeout(() => {
@@ -1536,36 +1525,3 @@ export function startSiren(): SirenHandle | null {
   };
 }
 
-function playDistantHonk(dest: AudioNode) {
-  const ctx = getAudioContext();
-  if (!ctx) return;
-  const t0 = ctx.currentTime;
-  const dur = 0.35 + Math.random() * 0.3;
-  const freq = 300 + Math.random() * 200;
-
-  const osc = ctx.createOscillator();
-  osc.type = 'square';
-  osc.frequency.value = freq;
-  const osc2 = ctx.createOscillator();
-  osc2.type = 'square';
-  osc2.frequency.value = freq * 1.5;
-
-  const lp = ctx.createBiquadFilter();
-  lp.type = 'lowpass';
-  lp.frequency.value = 800;
-
-  const g = ctx.createGain();
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(0.15, t0 + 0.04);
-  g.gain.setValueAtTime(0.15, t0 + dur - 0.08);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-
-  osc.connect(lp);
-  osc2.connect(lp);
-  lp.connect(g);
-  g.connect(dest);
-  osc.start(t0);
-  osc2.start(t0);
-  osc.stop(t0 + dur);
-  osc2.stop(t0 + dur);
-}

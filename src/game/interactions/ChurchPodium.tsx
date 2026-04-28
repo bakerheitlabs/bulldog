@@ -2,7 +2,6 @@ import { useFrame } from '@react-three/fiber';
 import { useGameStore } from '@/state/gameStore';
 import { useVehicleStore } from '@/game/vehicles/vehicleState';
 import { clearPrompt, setPrompt } from './interactionState';
-import { pickRandomVerse, type Verse } from '@/game/world/bibleVerses';
 import { getPodiumPosition } from '@/game/world/podiumPosition';
 
 // Tight radius — the trigger is at the exact pulpit position now (published
@@ -12,9 +11,9 @@ const RANGE = 2.5;
 const PROMPT_ID = 'church-podium';
 
 export default function ChurchPodium({
-  onOpen,
+  onOpenBibleReader,
 }: {
-  onOpen: (verse: Verse) => void;
+  onOpenBibleReader: () => void;
 }) {
   useFrame(() => {
     const pos = getPodiumPosition();
@@ -32,14 +31,8 @@ export default function ChurchPodium({
     if (dx * dx + dz * dz < RANGE * RANGE) {
       setPrompt({
         id: PROMPT_ID,
-        label: 'Press E to read',
-        onActivate: () => {
-          pickRandomVerse()
-            .then(onOpen)
-            .catch((err) => {
-              console.error('bible verse load failed', err);
-            });
-        },
+        label: 'Press E to read Bible',
+        onActivate: onOpenBibleReader,
       });
     } else {
       clearPrompt(PROMPT_ID);

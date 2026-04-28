@@ -17,7 +17,6 @@ import HospitalCounter from './interactions/HospitalCounter';
 import MechanicShop from './interactions/MechanicShop';
 import ChurchPodium from './interactions/ChurchPodium';
 import ChurchLightSwitch from './interactions/ChurchLightSwitch';
-import type { Verse } from './world/bibleVerses';
 import HitFx from './weapons/HitFx';
 import { useMeleeController } from './weapons/useMeleeController';
 import { useWeaponController } from './weapons/useWeaponController';
@@ -38,13 +37,15 @@ import MultiplayerProvider from '@/multiplayer/MultiplayerProvider';
 
 function SceneContent({
   paused,
+  inputPaused,
   onOpenShop,
-  onOpenVerse,
+  onOpenBibleReader,
   onOpenLightSwitch,
 }: {
   paused: boolean;
+  inputPaused: boolean;
   onOpenShop: () => void;
-  onOpenVerse: (verse: Verse) => void;
+  onOpenBibleReader: () => void;
   onOpenLightSwitch: () => void;
 }) {
   const inMpSession = useNetStore((s) => s.inGame);
@@ -75,10 +76,10 @@ function SceneContent({
     },
   };
 
-  const combatPaused = paused || drivenCarId != null || drivenPlaneId != null;
+  const combatPaused = inputPaused || drivenCarId != null || drivenPlaneId != null;
   useWeaponController({ paused: combatPaused });
   useMeleeController({ paused: combatPaused });
-  useVehicleInteraction(!paused);
+  useVehicleInteraction(!inputPaused);
 
   return (
     <>
@@ -92,11 +93,11 @@ function SceneContent({
       <GunStoreCounter onOpen={onOpenShop} />
       <HospitalCounter />
       <MechanicShop />
-      <ChurchPodium onOpen={onOpenVerse} />
+      <ChurchPodium onOpenBibleReader={onOpenBibleReader} />
       <ChurchLightSwitch onOpen={onOpenLightSwitch} />
-      <DrivableCars paused={paused} />
-      <SpawnedVehicles paused={paused} />
-      <Player ref={playerRef} paused={paused} />
+      <DrivableCars paused={inputPaused} />
+      <SpawnedVehicles paused={inputPaused} />
+      <Player ref={playerRef} paused={inputPaused} />
       <MultiplayerProvider />
       <ThirdPersonCamera target={camTarget} />
       <HitFx />
@@ -106,19 +107,21 @@ function SceneContent({
 
 export default function Game({
   paused,
+  inputPaused = paused,
   mouseFree,
   onOpenShop,
-  onOpenVerse,
+  onOpenBibleReader,
   onOpenLightSwitch,
 }: {
   paused: boolean;
+  inputPaused?: boolean;
   mouseFree?: boolean;
   onOpenShop: () => void;
-  onOpenVerse: (verse: Verse) => void;
+  onOpenBibleReader: () => void;
   onOpenLightSwitch: () => void;
 }) {
-  usePointerLook(!paused && !mouseFree);
-  useInteractionKey(!paused);
+  usePointerLook(!inputPaused && !mouseFree);
+  useInteractionKey(!inputPaused);
 
   const tickPlaytime = useGameStore((s) => s.tickPlaytime);
   const tickWanted = useGameStore((s) => s.tickWanted);
@@ -156,10 +159,10 @@ export default function Game({
   }, [paused, tickPlaytime, tickWanted, tickWorldTime, tickWeather, tickStocks, inMpClient]);
 
   useEffect(() => {
-    if ((paused || mouseFree) && document.pointerLockElement) {
+    if ((inputPaused || mouseFree) && document.pointerLockElement) {
       document.exitPointerLock();
     }
-  }, [paused, mouseFree]);
+  }, [inputPaused, mouseFree]);
 
   useEffect(
     () => () => {
@@ -190,7 +193,10 @@ export default function Game({
   }, []);
 
   const handleOpenShop = useCallback(() => onOpenShop(), [onOpenShop]);
-  const handleOpenVerse = useCallback((v: Verse) => onOpenVerse(v), [onOpenVerse]);
+  const handleOpenBibleReader = useCallback(
+    () => onOpenBibleReader(),
+    [onOpenBibleReader],
+  );
   const handleOpenLightSwitch = useCallback(
     () => onOpenLightSwitch(),
     [onOpenLightSwitch],
@@ -216,8 +222,9 @@ export default function Game({
         <Physics gravity={[0, -9.81, 0]} paused={paused} timeStep="vary">
           <SceneContent
             paused={paused}
+            inputPaused={inputPaused}
             onOpenShop={handleOpenShop}
-            onOpenVerse={handleOpenVerse}
+            onOpenBibleReader={handleOpenBibleReader}
             onOpenLightSwitch={handleOpenLightSwitch}
           />
         </Physics>

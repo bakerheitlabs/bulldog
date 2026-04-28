@@ -3,7 +3,7 @@ import Game from '@/game/Game';
 import HUD from '@/game/hud/HUD';
 import PauseMenu from '@/game/hud/PauseMenu';
 import PurchaseModal from '@/game/hud/PurchaseModal';
-import BibleVersePopup from '@/game/hud/BibleVersePopup';
+import BibleReaderPopup from '@/game/hud/bible/BibleReaderPopup';
 import ChurchLightSwitchPopup from '@/game/hud/ChurchLightSwitchPopup';
 import DamageVignette from '@/game/hud/DamageVignette';
 import VehicleEntered from '@/game/hud/VehicleEntered';
@@ -11,14 +11,13 @@ import WeaponWheel from '@/game/hud/WeaponWheel';
 import DevConsole from '@/game/hud/DevConsole';
 import Cellphone from '@/game/hud/Cellphone';
 import { useVehicleStore } from '@/game/vehicles/vehicleState';
-import type { Verse } from '@/game/world/bibleVerses';
 
 export default function GameRoute() {
   const [paused, setPaused] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [phoneOpen, setPhoneOpen] = useState(false);
-  const [verse, setVerse] = useState<Verse | null>(null);
+  const [bibleReaderOpen, setBibleReaderOpen] = useState(false);
   const [lightSwitchOpen, setLightSwitchOpen] = useState(false);
 
   useEffect(() => {
@@ -57,8 +56,8 @@ export default function GameRoute() {
         setShopOpen(false);
         return;
       }
-      if (verse) {
-        setVerse(null);
+      if (bibleReaderOpen) {
+        setBibleReaderOpen(false);
         return;
       }
       if (lightSwitchOpen) {
@@ -69,15 +68,15 @@ export default function GameRoute() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [shopOpen, consoleOpen, phoneOpen, verse, lightSwitchOpen]);
+  }, [shopOpen, consoleOpen, phoneOpen, bibleReaderOpen, lightSwitchOpen]);
 
   const openShop = useCallback(() => {
     setShopOpen(true);
     if (document.pointerLockElement) document.exitPointerLock();
   }, []);
 
-  const openVerse = useCallback((v: Verse) => {
-    setVerse(v);
+  const openBibleReader = useCallback(() => {
+    setBibleReaderOpen(true);
     if (document.pointerLockElement) document.exitPointerLock();
   }, []);
 
@@ -90,16 +89,18 @@ export default function GameRoute() {
     if (consoleOpen && document.pointerLockElement) document.exitPointerLock();
   }, [consoleOpen]);
 
-  const isModal =
-    paused || shopOpen || consoleOpen || verse !== null || lightSwitchOpen;
+  const gamePaused = paused || shopOpen || consoleOpen || lightSwitchOpen;
+  const inputPaused = gamePaused || bibleReaderOpen;
+  const isModal = inputPaused;
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#0a0a10' }}>
       <Game
-        paused={isModal}
-        mouseFree={phoneOpen}
+        paused={gamePaused}
+        inputPaused={inputPaused}
+        mouseFree={phoneOpen || bibleReaderOpen}
         onOpenShop={openShop}
-        onOpenVerse={openVerse}
+        onOpenBibleReader={openBibleReader}
         onOpenLightSwitch={openLightSwitch}
       />
       <HUD />
@@ -108,11 +109,13 @@ export default function GameRoute() {
       {!isModal && <WeaponWheel />}
       <Cellphone open={phoneOpen} onClose={() => setPhoneOpen(false)} />
       {shopOpen && <PurchaseModal onClose={() => setShopOpen(false)} />}
-      {verse && <BibleVersePopup verse={verse} onClose={() => setVerse(null)} />}
+      {bibleReaderOpen && (
+        <BibleReaderPopup onClose={() => setBibleReaderOpen(false)} />
+      )}
       {lightSwitchOpen && (
         <ChurchLightSwitchPopup onClose={() => setLightSwitchOpen(false)} />
       )}
-      {paused && !shopOpen && !consoleOpen && !verse && !lightSwitchOpen && (
+      {paused && !shopOpen && !consoleOpen && !bibleReaderOpen && !lightSwitchOpen && (
         <PauseMenu onResume={() => setPaused(false)} />
       )}
       <DevConsole open={consoleOpen} onClose={() => setConsoleOpen(false)} />

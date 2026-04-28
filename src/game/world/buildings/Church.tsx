@@ -223,6 +223,35 @@ export default function Church({
 
       <LightSwitch x={switchX} y={switchY} z={switchZ} rotationY={Math.PI} />
 
+      {/* Exterior porch lanterns flanking the south entrance. Lives on the
+          parent so it never subscribes to the interior dimmer store —
+          flipping the indoor switch must not affect these. */}
+      {[-1, 1].map((side) => {
+        const lx = x + side * (doorHalf + 0.25);
+        const ly = 4;
+        const lz = southZ - 0.75;
+        return (
+          <group key={`exterior_lantern_${side}`}>
+            <pointLight
+              position={[lx, ly, lz]}
+              color="#ffd9a0"
+              intensity={26}
+              distance={9}
+              decay={1.5}
+            />
+            <mesh position={[lx, ly, lz]} castShadow>
+              <boxGeometry args={[0.18, 0.3, 0.18]} />
+              <meshStandardMaterial
+                color="#2a1a08"
+                emissive="#ffb547"
+                emissiveIntensity={2.8}
+                toneMapped={false}
+              />
+            </mesh>
+          </group>
+        );
+      })}
+
       <ChurchInterior
         x={x}
         z={z}
