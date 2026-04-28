@@ -26,6 +26,7 @@ const GUNSTORE: [number, number] = [12, 12];
 const RANGE: [number, number] = [22, 22];
 const MECHANIC: [number, number] = [18, 8];
 const HOSPITAL: [number, number] = [4, 18];
+const CHURCH: [number, number] = [4, 4];
 
 // Fixed parks + parking lots so the whole city isn't wall-to-wall buildings.
 // All coords on even indices (odd = road).
@@ -64,7 +65,7 @@ export type BuildingCell = {
   kind: 'building';
   height: number;
   color: string;
-  tag?: 'gunstore' | 'range' | 'mechanic' | 'hospital';
+  tag?: 'gunstore' | 'range' | 'mechanic' | 'hospital' | 'church';
   blockType: BlockType;
   // Super-block anchor: lists absorbed (road + sibling-block) cells and the
   // merged footprint spanning all three.
@@ -221,6 +222,14 @@ function buildGrid(): Cell[][] {
           height: 10,
           color: '#e8ecef',
           tag: 'hospital',
+          blockType: 'standard',
+        });
+      } else if (col === CHURCH[0] && row === CHURCH[1]) {
+        line.push({
+          kind: 'building',
+          height: 14,
+          color: '#d8cfa8',
+          tag: 'church',
           blockType: 'standard',
         });
       } else if (parks.has(key)) {
@@ -973,7 +982,7 @@ export function getIntersection(col: number, row: number): Intersection | null {
 }
 
 export function findCellByTag(
-  tag: 'gunstore' | 'range' | 'mechanic' | 'hospital',
+  tag: 'gunstore' | 'range' | 'mechanic' | 'hospital' | 'church',
 ): CellInfo | null {
   for (const info of allCells()) {
     if (info.cell.kind === 'building' && info.cell.tag === tag) return info;

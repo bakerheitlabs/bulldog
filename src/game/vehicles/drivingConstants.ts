@@ -23,6 +23,16 @@ export const CAR_ANGULAR_DAMPING = 4;
 export const CAR_COLLIDER_HALF: [number, number, number] = [0.9, 0.45, 2];
 export const CAR_SPAWN_Y = 0.6;
 
+// Per-variant size multiplier applied to both the visual fit-length and the
+// physics collider so the two stay in sync. 1.0 = standard 4m car. The
+// Floord Enforcer (carPolice) is intentionally beefier than civilian traffic.
+const CAR_SIZE_SCALE: Record<string, number> = {
+  carPolice: 1.15,
+};
+export function getCarSizeScale(variant: string): number {
+  return CAR_SIZE_SCALE[variant] ?? 1;
+}
+
 // Speed at which an onHit damages the car / hurts the player it collides with.
 export const CAR_IMPACT_THRESHOLD = 4;
 // Hood offset used by smoke + fire emitters (model's +Z is forward).

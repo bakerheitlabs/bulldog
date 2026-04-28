@@ -118,6 +118,9 @@ Kenney releases his asset kits under [CC0 1.0](https://creativecommons.org/publi
 - **Submachine Gun** by **Quaternius** — [`public/models/weapons/Submachine Gun.glb`](public/models/weapons/Submachine%20Gun.glb)
   — [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/)
   — via Poly Pizza: <https://poly.pizza/m/nsP3JukU73>
+- **Church** by **Poly by Google** — [`public/models/city/Church.glb`](public/models/city/Church.glb)
+  — [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/)
+  — via Poly Pizza: <https://poly.pizza/m/6vzTphxL9w4>
 
 ## Project code
 

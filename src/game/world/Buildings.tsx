@@ -4,6 +4,7 @@ import { SIDEWALK_WIDTH, type BlockType } from './cityLayout';
 import { useCityModel, useFitToBox, type ModelKey } from './cityAssets';
 import GltfBoundary from './GltfBoundary';
 import { useVisibleCells } from './Chunks';
+import Church from './buildings/Church';
 
 const ALLEY_WIDTH = 2;
 const ALLEY_COLOR = '#3a3d44';
@@ -1103,6 +1104,7 @@ export default function Buildings() {
         const isRange = cell.tag === 'range';
         const isMechanic = cell.tag === 'mechanic';
         const isHospital = cell.tag === 'hospital';
+        const isChurch = cell.tag === 'church';
         const bodyColor = isGunstore ? '#a83a2c' : cell.color;
         const modelKey: ModelKey = isGunstore ? 'buildingGunstore' : 'buildingGeneric';
         const type: BlockType = cell.blockType;
@@ -1117,6 +1119,13 @@ export default function Buildings() {
           return (
             <group key={`b_${col}_${row}`}>
               <HospitalInterior x={x} z={z} w={w} d={d} h={h} />
+            </group>
+          );
+        }
+        if (isChurch) {
+          return (
+            <group key={`b_${col}_${row}`}>
+              <Church x={x} z={z} w={w} d={d} h={h} />
             </group>
           );
         }

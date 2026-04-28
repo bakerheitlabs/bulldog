@@ -24,6 +24,7 @@ import {
   CAR_IMPACT_THRESHOLD,
   CAR_LINEAR_DAMPING,
   CAR_MASS,
+  getCarSizeScale,
 } from './drivingConstants';
 import { useCarDriver } from './useCarDriver';
 import { registerVehicle } from './vehicleRegistry';
@@ -141,6 +142,12 @@ export default function Car({
   const headlightsManual = useVehicleStore((s) => s.headlightsManual);
   const isDriven = drivenCarId === id;
   const isPolice = variant === 'carPolice';
+  const carSize = getCarSizeScale(variant);
+  const colliderHalf: [number, number, number] = [
+    CAR_COLLIDER_HALF[0] * carSize,
+    CAR_COLLIDER_HALF[1] * carSize,
+    CAR_COLLIDER_HALF[2] * carSize,
+  ];
   const isNight = useIsNight();
   const tmpPos = useRef(new THREE.Vector3());
 
@@ -273,7 +280,7 @@ export default function Car({
             DEFAULT|KINEMATIC_KINEMATIC keeps the player car from receiving
             ground/building enter events that would self-damage on curbs. */}
         <CuboidCollider
-          args={CAR_COLLIDER_HALF}
+          args={colliderHalf}
           activeCollisionTypes={
             isDriven
               ? ActiveCollisionTypes.DEFAULT |

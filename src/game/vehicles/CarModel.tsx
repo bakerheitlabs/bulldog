@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useCityModel, useFitLength } from '@/game/world/cityAssets';
 import type { CarVariant } from './vehicleIdentity';
+import { getCarSizeScale } from './drivingConstants';
 
 const TARGET_LENGTH = 4;
 
@@ -43,7 +44,7 @@ export default function CarModel({
   siren?: boolean;
 }) {
   const scene = useCityModel(variant);
-  const { scale, yOffset } = useFitLength(scene, TARGET_LENGTH);
+  const { scale, yOffset } = useFitLength(scene, TARGET_LENGTH * getCarSizeScale(variant));
   // Per-instance material clones so color edits don't leak to other cars
   // sharing the cached Kenney material.
   const matsRef = useRef<THREE.MeshStandardMaterial[]>([]);

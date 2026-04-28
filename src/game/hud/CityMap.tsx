@@ -184,6 +184,7 @@ function cellFill(kind: string, tag?: string) {
   if (tag === 'gunstore') return '#8a3630';
   if (tag === 'range') return '#69524b';
   if (tag === 'hospital') return '#d5d9dd';
+  if (tag === 'church') return '#c8b58a';
   switch (kind) {
     case 'road':
       return '#2c2f35';
@@ -507,7 +508,13 @@ function MapCells({ showLabels }: { showLabels: boolean }) {
                   fontWeight={700}
                   fill={cell.tag === 'hospital' ? '#c03a38' : '#f5f1de'}
                 >
-                  {cell.tag === 'gunstore' ? 'G' : cell.tag === 'hospital' ? 'H' : 'R'}
+                  {cell.tag === 'gunstore'
+                    ? 'G'
+                    : cell.tag === 'hospital'
+                      ? 'H'
+                      : cell.tag === 'church'
+                        ? 'C'
+                        : 'R'}
                 </text>
               )}
             </g>

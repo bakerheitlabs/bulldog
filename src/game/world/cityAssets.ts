@@ -10,6 +10,7 @@ import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.j
 export const MODEL_PATHS = {
   buildingGeneric: '/models/city/building_generic.glb',
   buildingGunstore: '/models/city/building_gunstore.glb',
+  buildingChurch: '/models/city/Church.glb',
   trafficLight: '/models/city/Traffic Light.glb',
   carSedan: '/models/cars/car_sedan.glb',
   carSedanSports: '/models/cars/car_sedan_sports.glb',
