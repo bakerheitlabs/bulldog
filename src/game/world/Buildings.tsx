@@ -7,6 +7,7 @@ import { useVisibleCells } from './Chunks';
 import Church from './buildings/Church';
 import Stadium from './buildings/Stadium';
 import Marina from './buildings/Marina';
+import Hotel from './buildings/Hotel';
 
 const ALLEY_WIDTH = 2;
 const ALLEY_COLOR = '#3a3d44';
@@ -1109,6 +1110,7 @@ export default function Buildings() {
         const isChurch = cell.tag === 'church';
         const isStadium = cell.tag === 'stadium';
         const isMarina = cell.tag === 'marina';
+        const isHotel = cell.tag === 'hotel';
         const bodyColor = isGunstore ? '#a83a2c' : cell.color;
         const modelKey: ModelKey = isGunstore ? 'buildingGunstore' : 'buildingGeneric';
         const type: BlockType = cell.blockType;
@@ -1145,6 +1147,13 @@ export default function Buildings() {
           return (
             <group key={key}>
               <Marina x={x} z={z} w={w} d={d} h={h} />
+            </group>
+          );
+        }
+        if (isHotel) {
+          return (
+            <group key={key}>
+              <Hotel x={x} z={z} w={w} d={d} h={h} />
             </group>
           );
         }

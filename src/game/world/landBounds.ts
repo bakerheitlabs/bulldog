@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { CITY_DEPTH, CITY_MIN_X, CITY_MIN_Z, CITY_WIDTH } from './cityLayout';
 import { getSuburbBounds } from './suburbs';
 import { getMainAirportPadBounds } from './airport';
+import { getMainPoliceDistrictPadBounds } from './policeDistrict';
 import { ISLAND2_LANDMASS } from './island2';
 import { ISLAND3_CITY } from './island3';
 
@@ -335,8 +336,11 @@ function buildIslandData(spec: LandmassSpec): IslandData {
 }
 
 // Spec for the main island: encloses the city grid, the east suburb, and the
-// main airport. Other islands (e.g. island 2) own their own airports inside
-// their own landmass spec.
+// main airport. Other landmasses (island 2, island 3, the police compound)
+// own their own specs so they don't drag the main coast out to enclose them.
+// In particular the police pad sits ~250m SE of the city — unioning it into
+// this innerRect pushed the south coast past the bridge to island 3 and
+// stranded the docks ~280m inland.
 function getMainIslandSpec(): LandmassSpec {
   const suburbBounds = getSuburbBounds();
   const aptBounds = getMainAirportPadBounds();
@@ -356,6 +360,43 @@ function getMainIslandSpec(): LandmassSpec {
     // Three octaves matched to the previous look (sum of amplitudes ≈ 30m,
     // close to the original ±26m wobble).
     noise: { seed: 7, amplitudes: [16, 9, 5] },
+  };
+}
+
+// Police compound rides on its own landmass SE of the main city, but the
+// inner rect extends well to the NW so the perimeter overlaps the main
+// island's SE coast — the compound then reads as the tip of a chubby
+// peninsula reaching out from the main island, rather than a separate
+// islet stranded in open water with the access road suspended above it.
+//
+// `cornerRadii` is asymmetric: a heavy `rBL` (the NW corner facing the
+// main coast) curves the peninsula's neck smoothly into the merge, while
+// the SE corner stays tight so the police compound silhouette is compact.
+function getMainPoliceIslandSpec(): LandmassSpec {
+  const b = getMainPoliceDistrictPadBounds();
+  return {
+    id: 'police',
+    innerRect: {
+      // Push the peninsula's NW corner well into the main island's SE
+      // quadrant. With rBL=180, the NW-most grass point sits at
+      // (minX + 53, minZ + 53) ≈ (+353, +303), comfortably *inside*
+      // main's TR-arc grass region — that overlap is what eliminates the
+      // sand strip the user saw between the two islets. The previous
+      // values (-220, -170) only got the NW corner *near* main's SE
+      // grass, leaving a ~80m diagonal gap where neither grass covered
+      // and both beaches filled in with sand.
+      minX: b.minX - 320,
+      maxX: b.maxX + 30,
+      minZ: b.minZ - 270,
+      maxZ: b.maxZ + 30,
+    },
+    // [rTR, rBR, rBL, rTL] — rBL (NW, facing main) gets the big radius
+    // for a graceful curve into the main coast; the other three stay
+    // tight so the compound side reads as a small fortified pad.
+    cornerRadii: [55, 70, 180, 70],
+    // Slightly more noise for the longer shoreline; sum ≈ 25m, well
+    // under the 150m+ buffer between any perimeter point and the pad.
+    noise: { seed: 31, amplitudes: [12, 7, 4, 2] },
   };
 }
 
@@ -394,7 +435,12 @@ let _cached: IslandData[] | null = null;
 
 export function getAllIslands(): IslandData[] {
   if (_cached) return _cached;
-  _cached = [getMainIslandSpec(), ISLAND2_LANDMASS, getIsland3Spec()].map(buildIslandData);
+  _cached = [
+    getMainIslandSpec(),
+    ISLAND2_LANDMASS,
+    getIsland3Spec(),
+    getMainPoliceIslandSpec(),
+  ].map(buildIslandData);
   return _cached;
 }
 

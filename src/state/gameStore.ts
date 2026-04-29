@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 import { WEAPONS } from '@/game/weapons/weapons';
-import type { GameStoreSnapshot, WeaponId, WeatherType } from '@/save/schema';
+import type {
+  GameStoreSnapshot,
+  HotelRoomState,
+  HotelRoomTier,
+  WeaponId,
+  WeatherType,
+} from '@/save/schema';
 import {
   buildSchedule,
   mulberry32,
@@ -76,6 +82,16 @@ type GameState = GameStoreSnapshot & {
   setHealth: (hp: number) => void;
   setAmmoReserve: (id: WeaponId, reserve: number) => void;
   setWantedStars: (stars: number) => void;
+  // Hotel room rental: sets `properties.hotelRoom` with an expiry computed
+  // as `advanceDate(currentDate, days)`. Deducts `days * costPerDay` up
+  // front. Returns ok/reason like the trade actions.
+  rentHotelRoom: (
+    roomId: HotelRoomTier,
+    days: number,
+    costPerDay: number,
+  ) => { ok: boolean; reason?: string };
+  clearHotelRoom: () => void;
+  setHotelStash: (stash: HotelRoomState['stash']) => void;
 };
 
 export const HEAT_MAX = 100;
@@ -141,8 +157,22 @@ function initialSnapshot(): GameStoreSnapshot {
     time: { seconds: WORLD_TIME_START, ...WORLD_DATE_START },
     weather: { type: 'sunny' },
     stocks: initialStocks(),
+    properties: { hotelRoom: null },
     meta: { startedAt: Date.now(), playtimeMs: 0 },
   };
+}
+
+// Pure derived selector: is there a hotel rental whose expiry is still in
+// the future relative to the current world date? Comparing year/month/day
+// in lex order avoids dragging in a Date object for what is just a triple.
+export function hotelRoomActive(s: Pick<GameStoreSnapshot, 'time' | 'properties'>): boolean {
+  const room = s.properties.hotelRoom;
+  if (!room) return false;
+  const t = s.time;
+  const e = room.expires;
+  if (t.year !== e.year) return t.year < e.year;
+  if (t.month !== e.month) return t.month < e.month;
+  return t.day < e.day;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -178,6 +208,18 @@ export const useGameStore = create<GameState>((set, get) => ({
         ),
         elapsedSinceLastTick: s.stocks.elapsedSinceLastTick,
         rngState: s.stocks.rngState,
+      },
+      properties: {
+        hotelRoom: s.properties.hotelRoom
+          ? {
+              roomId: s.properties.hotelRoom.roomId,
+              expires: { ...s.properties.hotelRoom.expires },
+              stash: {
+                weapons: [...s.properties.hotelRoom.stash.weapons],
+                cash: s.properties.hotelRoom.stash.cash,
+              },
+            }
+          : null,
       },
       meta: { ...s.meta },
     };
@@ -496,5 +538,40 @@ export const useGameStore = create<GameState>((set, get) => ({
       const n = Math.max(0, Math.min(5, Math.round(stars)));
       if (n === 0) return { wanted: { heat: 0, lastCrimeAt: 0 } };
       return { wanted: { heat: n * HEAT_PER_STAR, lastCrimeAt: Date.now() } };
+    }),
+  rentHotelRoom: (roomId, days, costPerDay) => {
+    if (!Number.isInteger(days) || days <= 0) {
+      return { ok: false, reason: 'days must be a positive integer' };
+    }
+    const cost = days * costPerDay;
+    const s = get();
+    if (s.player.money < cost) return { ok: false, reason: 'insufficient funds' };
+    const today = { year: s.time.year, month: s.time.month, day: s.time.day };
+    const expires = advanceDate(today, days);
+    // Preserve any existing stash if the player re-rents — they keep what's
+    // already inside the wardrobe across rentals. Fresh stash on first rent.
+    const stash = s.properties.hotelRoom?.stash ?? { weapons: [], cash: 0 };
+    set({
+      player: { ...s.player, money: s.player.money - cost },
+      properties: { hotelRoom: { roomId, expires, stash } },
+    });
+    return { ok: true };
+  },
+  clearHotelRoom: () => set({ properties: { hotelRoom: null } }),
+  setHotelStash: (stash) =>
+    set((s) => {
+      const room = s.properties.hotelRoom;
+      if (!room) return {};
+      return {
+        properties: {
+          hotelRoom: {
+            ...room,
+            stash: {
+              weapons: [...stash.weapons],
+              cash: stash.cash,
+            },
+          },
+        },
+      };
     }),
 }));

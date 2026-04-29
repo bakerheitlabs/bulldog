@@ -1,9 +1,10 @@
 // Lazy loader for the bundled WEB. The file lives in public/data/ and is
-// served by Vite at /data/bible-web.json. Verse text is public domain (World
-// English Bible, a modern-English revision of the ASV — chosen over KJV for
-// readability). The first call kicks off a single fetch — concurrent callers
-// reuse the same in-flight promise, and once parsed the flat index is cached
-// for the rest of the session.
+// fetched via a relative path so it works in both Vite dev (served at root)
+// and packaged Electron (file:// next to dist/index.html). Verse text is
+// public domain (World English Bible, a modern-English revision of the ASV —
+// chosen over KJV for readability). The first call kicks off a single fetch —
+// concurrent callers reuse the same in-flight promise, and once parsed the
+// flat index is cached for the rest of the session.
 
 export type BibleBook = { book: string; chapters: string[][] };
 export type BibleVerseLocation = { bookIndex: number; chapterIndex: number; verse: number };
@@ -20,7 +21,7 @@ let verseIndexInFlight: Promise<IndexedBibleVerse[]> | null = null;
 export async function loadBibleBooks(): Promise<BibleBook[]> {
   if (booksCache) return booksCache;
   if (booksInFlight) return booksInFlight;
-  booksInFlight = fetch('/data/bible-web.json')
+  booksInFlight = fetch('data/bible-web.json')
     .then((r) => {
       if (!r.ok) throw new Error(`bible fetch ${r.status}`);
       return r.json() as Promise<RawBook[]>;

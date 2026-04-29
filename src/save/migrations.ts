@@ -67,6 +67,16 @@ const MIGRATIONS: Record<number, Migration> = {
       },
     };
   },
+  6: (raw) => ({
+    ...raw,
+    version: 7,
+    game: {
+      ...raw.game,
+      // Hotel rentals introduced in v7. Existing slots come back to no
+      // active rental — the player must visit the front desk to check in.
+      properties: { hotelRoom: null },
+    },
+  }),
 };
 
 export function migrate(raw: any): SaveData {

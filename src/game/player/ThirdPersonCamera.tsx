@@ -72,8 +72,12 @@ export default function ThirdPersonCamera({ target }: { target: CameraTarget }) 
 
     // Pull the camera in if a wall is between the player and its desired spot,
     // otherwise the camera ends up on the far side and renders the room
-    // through-the-wall. EXCLUDE_DYNAMIC skips the player/vehicles; EXCLUDE_SENSORS
-    // skips trigger volumes so they don't shove the camera around.
+    // through-the-wall. EXCLUDE_DYNAMIC skips parked vehicles/the player on
+    // foot; EXCLUDE_KINEMATIC skips the driven car/plane (whose collider
+    // surrounds the camera target — without this the ray returns TOI=0 and
+    // squishes the camera onto the target inside the fuselage) plus AI cars;
+    // EXCLUDE_SENSORS skips trigger volumes so they don't shove the camera
+    // around.
     tmpDir.copy(tmpDesired).sub(tmpTarget);
     const desiredDist = tmpDir.length();
     if (desiredDist > 0.001) {
@@ -83,7 +87,9 @@ export default function ThirdPersonCamera({ target }: { target: CameraTarget }) 
         ray,
         desiredDist,
         true,
-        rapier.QueryFilterFlags.EXCLUDE_DYNAMIC | rapier.QueryFilterFlags.EXCLUDE_SENSORS,
+        rapier.QueryFilterFlags.EXCLUDE_DYNAMIC
+          | rapier.QueryFilterFlags.EXCLUDE_KINEMATIC
+          | rapier.QueryFilterFlags.EXCLUDE_SENSORS,
       );
       if (hit) {
         // Cap the camera at (toi - inset) so it never lands past the wall.

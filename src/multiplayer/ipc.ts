@@ -19,6 +19,7 @@ export type MpTransportEvent =
 
 interface BulldogMP {
   available: true;
+  openExternal(url: string): Promise<void>;
   getNetworkInfo(): Promise<NetworkInfo>;
   hostStart(port: number): Promise<StartResult>;
   hostStop(): Promise<void>;

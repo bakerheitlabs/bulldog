@@ -17,6 +17,7 @@ import HospitalCounter from './interactions/HospitalCounter';
 import MechanicShop from './interactions/MechanicShop';
 import ChurchPodium from './interactions/ChurchPodium';
 import ChurchLightSwitch from './interactions/ChurchLightSwitch';
+import HotelInteractions from './interactions/HotelInteractions';
 import HitFx from './weapons/HitFx';
 import { useMeleeController } from './weapons/useMeleeController';
 import { useWeaponController } from './weapons/useWeaponController';
@@ -41,12 +42,20 @@ function SceneContent({
   onOpenShop,
   onOpenBibleReader,
   onOpenLightSwitch,
+  onOpenHotelRent,
+  onOpenSleep,
+  onOpenStash,
+  onSaveAtDesk,
 }: {
   paused: boolean;
   inputPaused: boolean;
   onOpenShop: () => void;
   onOpenBibleReader: () => void;
   onOpenLightSwitch: () => void;
+  onOpenHotelRent: () => void;
+  onOpenSleep: () => void;
+  onOpenStash: () => void;
+  onSaveAtDesk: () => void;
 }) {
   const inMpSession = useNetStore((s) => s.inGame);
   const isHost = useNetStore((s) => s.isHost);
@@ -95,6 +104,12 @@ function SceneContent({
       <MechanicShop />
       <ChurchPodium onOpenBibleReader={onOpenBibleReader} />
       <ChurchLightSwitch onOpen={onOpenLightSwitch} />
+      <HotelInteractions
+        onOpenRent={onOpenHotelRent}
+        onOpenSleep={onOpenSleep}
+        onOpenStash={onOpenStash}
+        onSave={onSaveAtDesk}
+      />
       <DrivableCars paused={inputPaused} />
       <SpawnedVehicles paused={inputPaused} />
       <Player ref={playerRef} paused={inputPaused} />
@@ -112,6 +127,10 @@ export default function Game({
   onOpenShop,
   onOpenBibleReader,
   onOpenLightSwitch,
+  onOpenHotelRent,
+  onOpenSleep,
+  onOpenStash,
+  onSaveAtDesk,
 }: {
   paused: boolean;
   inputPaused?: boolean;
@@ -119,6 +138,10 @@ export default function Game({
   onOpenShop: () => void;
   onOpenBibleReader: () => void;
   onOpenLightSwitch: () => void;
+  onOpenHotelRent: () => void;
+  onOpenSleep: () => void;
+  onOpenStash: () => void;
+  onSaveAtDesk: () => void;
 }) {
   usePointerLook(!inputPaused && !mouseFree);
   useInteractionKey(!inputPaused);
@@ -201,6 +224,10 @@ export default function Game({
     () => onOpenLightSwitch(),
     [onOpenLightSwitch],
   );
+  const handleOpenHotelRent = useCallback(() => onOpenHotelRent(), [onOpenHotelRent]);
+  const handleOpenSleep = useCallback(() => onOpenSleep(), [onOpenSleep]);
+  const handleOpenStash = useCallback(() => onOpenStash(), [onOpenStash]);
+  const handleSaveAtDesk = useCallback(() => onSaveAtDesk(), [onSaveAtDesk]);
 
   return (
     <Canvas
@@ -226,6 +253,10 @@ export default function Game({
             onOpenShop={handleOpenShop}
             onOpenBibleReader={handleOpenBibleReader}
             onOpenLightSwitch={handleOpenLightSwitch}
+            onOpenHotelRent={handleOpenHotelRent}
+            onOpenSleep={handleOpenSleep}
+            onOpenStash={handleOpenStash}
+            onSaveAtDesk={handleSaveAtDesk}
           />
         </Physics>
       </Suspense>

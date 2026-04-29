@@ -32,9 +32,12 @@ function buildTicks(): Tick[] {
   return out;
 }
 
-// yaw=0 → +Z (North), yaw=π/2 → +X (East). See planePhysics.ts.
+// Plane physics stores yaw with yaw=0 → forward +Z. The world map renders
+// +Z downward, so visually +Z is south and -Z is north — i.e. plane yaw=0
+// reads as 180° on the compass. Flip and offset accordingly so the heading
+// matches the direction the player sees the plane flying on the minimap.
 function yawToHeadingDeg(yaw: number): number {
-  let deg = (yaw * 180) / Math.PI;
+  let deg = 180 - (yaw * 180) / Math.PI;
   deg = ((deg % 360) + 360) % 360;
   return deg;
 }

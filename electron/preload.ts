@@ -17,6 +17,7 @@ type MpEvent =
 
 const api = {
   available: true,
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('app:open-external', url),
   getNetworkInfo: (): Promise<NetworkInfo> => ipcRenderer.invoke('mp:get-network-info'),
   hostStart: (port: number): Promise<StartResult> =>
     ipcRenderer.invoke('mp:host-start', { port }),

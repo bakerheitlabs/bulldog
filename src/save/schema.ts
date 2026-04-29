@@ -1,4 +1,4 @@
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 
 export type WeaponId = 'handgun' | 'shotgun' | 'smg';
 
@@ -11,6 +11,17 @@ export type WantedState = {
 
 export const WEATHER_TYPES = ['sunny', 'cloudy', 'rain', 'storm'] as const;
 export type WeatherType = (typeof WEATHER_TYPES)[number];
+
+export const HOTEL_ROOM_TIERS = ['standard', 'deluxe', 'penthouse'] as const;
+export type HotelRoomTier = (typeof HOTEL_ROOM_TIERS)[number];
+
+export type HotelRoomState = {
+  roomId: HotelRoomTier;
+  // In-game date AT/AFTER which the rental expires. Cleared when the world
+  // clock crosses this date.
+  expires: { year: number; month: number; day: number };
+  stash: { weapons: WeaponId[]; cash: number };
+};
 
 export type GameStoreSnapshot = {
   player: {
@@ -51,6 +62,9 @@ export type GameStoreSnapshot = {
     elapsedSinceLastTick: number;
     // Persisted mulberry32 state so save→load is deterministic.
     rngState: number;
+  };
+  properties: {
+    hotelRoom: HotelRoomState | null;
   };
   meta: {
     startedAt: number;

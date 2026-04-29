@@ -44,7 +44,8 @@ export type BuildingTag =
   | 'hospital'
   | 'church'
   | 'stadium'
-  | 'marina';
+  | 'marina'
+  | 'hotel';
 
 export type BuildingCell = {
   kind: 'building';
@@ -953,6 +954,7 @@ const MAIN_LANDMARKS: ReadonlyArray<LandmarkSpec> = [
   { tag: 'mechanic', col: 18, row: 8, height: 6, color: '#3a3d44' },
   { tag: 'hospital', col: 4, row: 18, height: 10, color: '#e8ecef' },
   { tag: 'church', col: 4, row: 4, height: 14, color: '#d8cfa8' },
+  { tag: 'hotel', col: 16, row: 16, height: 38, color: '#cdb98a' },
 ];
 
 const MAIN_PARKS: ReadonlyArray<[number, number]> = [

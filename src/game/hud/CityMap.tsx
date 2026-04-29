@@ -30,6 +30,8 @@ import { useGameStore } from '@/state/gameStore';
 import {
   readDrivenCarPos,
   readDrivenCarYaw,
+  readDrivenPlanePos,
+  readDrivenPlaneYaw,
   useVehicleStore,
 } from '@/game/vehicles/vehicleState';
 
@@ -138,25 +140,34 @@ function headingDegrees(yaw: number, driven: boolean) {
 function useMapPose() {
   const player = useGameStore((s) => s.player);
   const drivenCarId = useVehicleStore((s) => s.drivenCarId);
+  const drivenPlaneId = useVehicleStore((s) => s.drivenPlaneId);
   const [drivenPose, setDrivenPose] = useState<{ x: number; z: number; yaw: number } | null>(null);
   const [speedMps, setSpeedMps] = useState(0);
   const lastSample = useRef<{ x: number; z: number; t: number } | null>(null);
 
   useEffect(() => {
-    if (!drivenCarId) {
+    if (!drivenCarId && !drivenPlaneId) {
       setDrivenPose(null);
       return;
     }
 
     let raf = 0;
     const tick = () => {
-      const pos = readDrivenCarPos();
-      if (pos) setDrivenPose({ x: pos.x, z: pos.z, yaw: readDrivenCarYaw() });
+      // Plane and car share the same map convention (yaw=0 → forward +Z),
+      // so they go through the same `driven` heading formula below; we just
+      // pull pose from whichever pose-mirror is active.
+      if (drivenPlaneId) {
+        const pos = readDrivenPlanePos();
+        if (pos) setDrivenPose({ x: pos.x, z: pos.z, yaw: readDrivenPlaneYaw() });
+      } else {
+        const pos = readDrivenCarPos();
+        if (pos) setDrivenPose({ x: pos.x, z: pos.z, yaw: readDrivenCarYaw() });
+      }
       raf = requestAnimationFrame(tick);
     };
     tick();
     return () => cancelAnimationFrame(raf);
-  }, [drivenCarId]);
+  }, [drivenCarId, drivenPlaneId]);
 
   const pose = drivenPose
     ? {
@@ -196,6 +207,7 @@ function cellFill(kind: string, tag?: string) {
   if (tag === 'church') return '#c8b58a';
   if (tag === 'stadium') return '#7a7d83';
   if (tag === 'marina') return '#cdb98a';
+  if (tag === 'hotel') return '#d4af56';
   switch (kind) {
     case 'road':
       return '#2c2f35';
@@ -532,7 +544,9 @@ function MapCells({ showLabels }: { showLabels: boolean }) {
                           ? 'S'
                           : cell.tag === 'marina'
                             ? 'M'
-                            : 'R'}
+                            : cell.tag === 'hotel'
+                              ? 'HTL'
+                              : 'R'}
                 </text>
               )}
             </g>
@@ -742,16 +756,12 @@ export default function CityMap({ variant }: CityMapProps) {
     if (!isMinimap) {
       return `${pauseView.x} ${pauseView.y} ${vbWidth(pauseView.size)} ${pauseView.size}`;
     }
-    const x = clamp(
-      player.x - minimapViewSize / 2,
-      WORLD_MIN_X,
-      WORLD_MAX_X - minimapViewSize,
-    );
-    const y = clamp(
-      player.y - minimapViewSize / 2,
-      WORLD_MIN_Y,
-      WORLD_MAX_Y - minimapViewSize,
-    );
+    // GTA-style minimap: keep the player permanently at the centre of the
+    // viewBox so map rotation pivots around them. No world-edge clamp — when
+    // the player is near a coastline the rotated viewBox simply exposes the
+    // water-coloured panel background, which reads as ocean.
+    const x = player.x - minimapViewSize / 2;
+    const y = player.y - minimapViewSize / 2;
     return `${x} ${y} ${minimapViewSize} ${minimapViewSize}`;
   }, [isMinimap, minimapViewSize, pauseView, player.x, player.y]);
 
@@ -882,13 +892,13 @@ export default function CityMap({ variant }: CityMapProps) {
     ? {
         width: 158,
         height: 158,
-        background: 'rgba(7,8,10,0.72)',
-        border: '1px solid rgba(255,255,255,0.14)',
-        borderRadius: 10,
+        // Water-coloured background so any corner exposed when the rotated
+        // viewBox extends past the world rect reads as ocean.
+        background: WATER_COLOR,
+        border: '2px solid rgba(255,255,255,0.18)',
+        borderRadius: '50%',
         overflow: 'hidden',
         boxShadow: '0 10px 30px rgba(0,0,0,0.45), 0 0 0 1px rgba(0,0,0,0.4)',
-        backdropFilter: 'blur(6px)',
-        WebkitBackdropFilter: 'blur(6px)',
       }
     : {
         // Match the world's aspect ratio so the entire map fills the panel
@@ -929,14 +939,71 @@ export default function CityMap({ variant }: CityMapProps) {
           height={WORLD_HEIGHT + MAP_PADDING * 2}
           fill={WATER_COLOR}
         />
-        <IslandLayer />
-        <AirportLayer showLabels={!isMinimap} />
-        <MapCells showLabels={!isMinimap} />
-        <SuburbLayer />
-        <BridgeLayer />
-        <DockLayer />
+        {/* GTA-style minimap: rotate the world around the player so their
+            facing direction is always at the top of the dial. The marker
+            below is rendered outside this group with no rotation, so it
+            stays fixed pointing up. The pause map skips the rotation —
+            it stays north-up and the marker rotates instead. */}
         <g
-          transform={`translate(${player.x} ${player.y}) rotate(${pose.heading}) scale(${markerScale})`}
+          transform={
+            isMinimap
+              ? `rotate(${-pose.heading} ${player.x} ${player.y})`
+              : undefined
+          }
+        >
+          <IslandLayer />
+          <AirportLayer showLabels={!isMinimap} />
+          <MapCells showLabels={!isMinimap} />
+          <SuburbLayer />
+          <BridgeLayer />
+          <DockLayer />
+          {/* N/E/S/W cardinal labels pinned to world directions. They live
+              inside the rotating group so their position tracks true world
+              north/east/south/west; each label counter-rotates by
+              +pose.heading around its own anchor so the glyph stays upright
+              while the position rotates around the dial edge. */}
+          {isMinimap &&
+            (() => {
+              const r = (minimapViewSize / 2) * 0.88;
+              const fontSize = minimapViewSize * 0.085;
+              const cardinals = [
+                { letter: 'N', dx: 0, dy: -r },
+                { letter: 'E', dx: r, dy: 0 },
+                { letter: 'S', dx: 0, dy: r },
+                { letter: 'W', dx: -r, dy: 0 },
+              ];
+              return cardinals.map(({ letter, dx, dy }) => {
+                const lx = player.x + dx;
+                const ly = player.y + dy;
+                return (
+                  <text
+                    key={letter}
+                    x={lx}
+                    y={ly}
+                    transform={`rotate(${pose.heading} ${lx} ${ly})`}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={fontSize}
+                    fontWeight={800}
+                    fill="#f5d76e"
+                    stroke="rgba(0,0,0,0.85)"
+                    strokeWidth={fontSize * 0.18}
+                    paintOrder="stroke"
+                    fontFamily="Inter, system-ui, sans-serif"
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    {letter}
+                  </text>
+                );
+              });
+            })()}
+        </g>
+        <g
+          transform={
+            isMinimap
+              ? `translate(${player.x} ${player.y}) scale(${markerScale})`
+              : `translate(${player.x} ${player.y}) rotate(${pose.heading}) scale(${markerScale})`
+          }
         >
           <polygon
             points="0,-8 6,7 0,4 -6,7"

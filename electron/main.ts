@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import * as path from 'node:path';
 import { getNetworkInfo } from './net/netInfo';
 import { HostServer } from './net/server';
@@ -47,6 +47,14 @@ function createWindow(): void {
     if (mainWindow === win) mainWindow = null;
   });
 
+  // F12 toggles DevTools in any build — without this the only way to diagnose
+  // a packaged-app issue is to ship a debug build, which is too slow a loop.
+  win.webContents.on('before-input-event', (_event, input) => {
+    if (input.type === 'keyDown' && input.key === 'F12') {
+      win.webContents.toggleDevTools();
+    }
+  });
+
   if (isDev) {
     win.loadURL(DEV_URL!);
     win.webContents.openDevTools({ mode: 'detach' });
@@ -54,6 +62,13 @@ function createWindow(): void {
     win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 }
+
+ipcMain.handle('app:open-external', async (_e, url: string) => {
+  // Only allow http(s) so a compromised renderer can't trigger arbitrary
+  // protocol handlers (file://, etc.).
+  if (!/^https?:\/\//i.test(url)) return;
+  await shell.openExternal(url);
+});
 
 ipcMain.handle('mp:get-network-info', async () => getNetworkInfo());
 

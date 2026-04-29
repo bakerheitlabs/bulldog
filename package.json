@@ -14,7 +14,40 @@
     "build": "tsc -b && vite build && npm run build:electron",
     "preview": "vite preview",
     "start": "electron dist-electron/main.cjs",
-    "typecheck": "tsc -b --noEmit && tsc -p electron/tsconfig.json --noEmit"
+    "typecheck": "tsc -b --noEmit && tsc -p electron/tsconfig.json --noEmit",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:all": "npm run build && electron-builder --mac --win"
+  },
+  "build": {
+    "appId": "com.chickenfingerstudios.bulldog",
+    "productName": "Bulldog",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.games",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
+      ]
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",
@@ -37,6 +70,7 @@
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^33.0.0",
+    "electron-builder": "^26.8.1",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
     "wait-on": "^8.0.1"
